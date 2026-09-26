@@ -1,192 +1,192 @@
 ﻿{
-    "ExecutionTimestamp":  "2026-09-27T00:24:56.8823404+03:00",
+    "ExecutionTimestamp":  "2026-09-27T01:02:09.7669472+03:00",
     "TotalTests":  40,
     "PassCount":  40,
     "FailCount":  0,
     "PassRatePercent":  100,
-    "TotalDurationMs":  8865.62,
+    "TotalDurationMs":  9477.17,
     "Tests":  [
                   {
                       "Category":  "AST Parser",
                       "TestName":  "PostInstallEngine.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 2844, Size: 22161 bytes",
-                      "DurationMs":  19.82
+                      "DurationMs":  17.37
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "PostInstallUI.ps1",
                       "Status":  "PASS",
-                      "Details":  "Valid AST (ScriptBlockAst), Tokens: 11218, Size: 71453 bytes",
-                      "DurationMs":  9.76
+                      "Details":  "Valid AST (ScriptBlockAst), Tokens: 11268, Size: 71584 bytes",
+                      "DurationMs":  9.89
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "00_SystemSnapshotAndBackup.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 127, Size: 1827 bytes",
-                      "DurationMs":  0.52
+                      "DurationMs":  0.6
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "01_SystemBaseline.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 673, Size: 7357 bytes",
-                      "DurationMs":  3.21
+                      "DurationMs":  3.59
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "02_StorageAndDisks.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 477, Size: 4713 bytes",
-                      "DurationMs":  0.85
+                      "DurationMs":  0.88
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "03_WindowsUpdateAndHygiene.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 266, Size: 2968 bytes",
-                      "DurationMs":  0.59
+                      "DurationMs":  0.66
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "04_CoreRuntimes.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 1209, Size: 11821 bytes",
-                      "DurationMs":  1.85
+                      "DurationMs":  1.52
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "05_HardwareAndDrivers.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 593, Size: 6144 bytes",
-                      "DurationMs":  0.85
+                      "DurationMs":  0.98
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "06_DeveloperTools.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 537, Size: 5819 bytes",
-                      "DurationMs":  0.94
+                      "DurationMs":  0.78
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "07_EnvironmentAndPaths.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 509, Size: 5058 bytes",
-                      "DurationMs":  1.24
+                      "DurationMs":  1.07
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "08_PostInstallAudit.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 1451, Size: 11401 bytes",
-                      "DurationMs":  1.93
+                      "DurationMs":  1.81
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "09_SystemUpdates.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 887, Size: 9406 bytes",
-                      "DurationMs":  1.16
+                      "DurationMs":  1.26
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "10_CustomOfflineInstallers.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 408, Size: 4281 bytes",
-                      "DurationMs":  0.86
+                      "DurationMs":  0.81
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "11_NetworkAndDNSOptimization.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 403, Size: 4468 bytes",
-                      "DurationMs":  0.72
+                      "DurationMs":  0.74
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "12_SecurityBaseline.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 327, Size: 4143 bytes",
-                      "DurationMs":  0.67
+                      "DurationMs":  0.7
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "DriverEngine.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 548, Size: 3669 bytes",
-                      "DurationMs":  0.77
+                      "DurationMs":  0.69
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "Enforce-Encoding.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 137, Size: 718 bytes",
-                      "DurationMs":  0.52
+                      "DurationMs":  0.7
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "HardwareMonitorEngine.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 1323, Size: 7989 bytes",
-                      "DurationMs":  2.18
+                      "DurationMs":  2.91
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "MaintenanceEngine.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 1428, Size: 11136 bytes",
-                      "DurationMs":  1.5
+                      "DurationMs":  1.48
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "PackageEngine.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 1463, Size: 11876 bytes",
-                      "DurationMs":  1.63
+                      "DurationMs":  1.92
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "ReportingEngine.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 323, Size: 8203 bytes",
-                      "DurationMs":  1
+                      "DurationMs":  0.87
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "SilentDetector.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 888, Size: 8024 bytes",
-                      "DurationMs":  1.11
+                      "DurationMs":  1.18
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "SnapshotEngine.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 747, Size: 7256 bytes",
-                      "DurationMs":  1.28
+                      "DurationMs":  1.3
                   },
                   {
                       "Category":  "AST Parser",
                       "TestName":  "SystemSpecsCollector.ps1",
                       "Status":  "PASS",
                       "Details":  "Valid AST (ScriptBlockAst), Tokens: 1317, Size: 9624 bytes",
-                      "DurationMs":  1.25
+                      "DurationMs":  1.26
                   },
                   {
                       "Category":  "Configuration",
                       "TestName":  "config.json Schema \u0026 Keys",
                       "Status":  "PASS",
                       "Details":  "All 9 required keys present. Host: *, Ver: 4.0.0",
-                      "DurationMs":  105.32
+                      "DurationMs":  112.35
                   },
                   {
                       "Category":  "Step Sequence",
                       "TestName":  "steps.json Array Count",
                       "Status":  "PASS",
                       "Details":  "Discovered 13 defined installation steps",
-                      "DurationMs":  5.84
+                      "DurationMs":  5.45
                   },
                   {
                       "Category":  "Step Sequence",
@@ -228,63 +228,63 @@
                       "TestName":  "SilentDetector.ps1",
                       "Status":  "PASS",
                       "Details":  "MSI (/qn), AppX (Add-AppxPackage), and directory scanning validated",
-                      "DurationMs":  122.17
+                      "DurationMs":  186.18
                   },
                   {
                       "Category":  "Tools Sandbox",
                       "TestName":  "SystemSpecsCollector.ps1 (Universal Specs)",
                       "Status":  "PASS",
                       "Details":  "Chassis: Dizustu Bilgisayar (Laptop / Mobil) | Laptop: True | CPU: AMD Ryzen 7 6800H with Radeon Graphics | RAM: 16 GB | Primary GPU: NVIDIA GeForce RTX 3050 Laptop GPU (Surucu: 32.0.16.1088) | Vendors: [NVIDIA, AMD]",
-                      "DurationMs":  3037.29
+                      "DurationMs":  3624.9
                   },
                   {
                       "Category":  "Tools Sandbox",
                       "TestName":  "DriverEngine.ps1",
                       "Status":  "PASS",
                       "Details":  "Export-SystemDrivers and Install-SystemDrivers validated (INF discovery: PASS)",
-                      "DurationMs":  196.24
+                      "DurationMs":  170.52
                   },
                   {
                       "Category":  "Tools Sandbox",
                       "TestName":  "PackageEngine.ps1",
                       "Status":  "PASS",
                       "Details":  "Install-ResilientPackage 3-tier fallback and registry precheck validated",
-                      "DurationMs":  1271.48
+                      "DurationMs":  1311.52
                   },
                   {
                       "Category":  "Tools Sandbox",
                       "TestName":  "ReportingEngine.ps1",
                       "Status":  "PASS",
                       "Details":  "New-PostInstallHtmlReport generated responsive valid HTML5 dashboard",
-                      "DurationMs":  49.74
+                      "DurationMs":  51.47
                   },
                   {
                       "Category":  "Tools Sandbox",
                       "TestName":  "MaintenanceEngine.ps1",
                       "Status":  "PASS",
-                      "Details":  "Cleaned: 235.03 MB | Battery Health: 36.6%",
-                      "DurationMs":  1206.63
+                      "Details":  "Cleaned: 235.03 MB | Battery Health: 99.5%",
+                      "DurationMs":  1215.37
                   },
                   {
                       "Category":  "Tools Sandbox",
                       "TestName":  "HardwareMonitorEngine.ps1",
                       "Status":  "PASS",
-                      "Details":  "CPU: AMD Ryzen 7 6800H with Radeon Graphics (100%) | RAM: 11/15.19 GB | GPUs: 2",
-                      "DurationMs":  2739.08
+                      "Details":  "CPU: AMD Ryzen 7 6800H with Radeon Graphics (0%) | RAM: 11/15.19 GB | GPUs: 2",
+                      "DurationMs":  2671.29
                   },
                   {
                       "Category":  "Binary Health",
                       "TestName":  "PostInstall.exe Integrity \u0026 EntryPoint",
                       "Status":  "PASS",
                       "Details":  "Size: 6656 bytes, PE MZ: True, Runtime: v4.0.30319, EntryPoint: Program.Main, Architecture: MSIL",
-                      "DurationMs":  17.05
+                      "DurationMs":  14.91
                   },
                   {
                       "Category":  "State Engine",
                       "TestName":  "Atomic State Persistence \u0026 Recovery",
                       "Status":  "PASS",
-                      "Details":  "Atomic temp file swap, crash recovery, session integrity (0cd6ef72-0024-4ea4-a849-60545c583721), and multi-step progression validated",
-                      "DurationMs":  53.57
+                      "Details":  "Atomic temp file swap, crash recovery, session integrity (a166f392-3745-43ac-b6bb-ea1d30689ee6), and multi-step progression validated",
+                      "DurationMs":  53.24
                   }
               ]
 }

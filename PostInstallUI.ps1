@@ -1103,6 +1103,7 @@ function Update-GpuCenterCard {
             $instVer = $chk.InstalledVersion
         }
 
+        $softwareStatus = if ($isInstalled) { "Kurulu (v$instVer)" } else { "Kurulu Değil" }
         $lblDetails = New-Object System.Windows.Forms.Label
         $lblDetails.Font        = $Theme.FontCardTxt
         $lblDetails.ForeColor   = $Theme.TextPrimary
@@ -1111,7 +1112,7 @@ function Update-GpuCenterCard {
         $lblDetails.Text        = "Üretici         : $vendorKey`r`n" +
                                   "Sürücü Sürümü   : $driverVer`r`n" +
                                   "Önerilen Yazılım: $recApp`r`n" +
-                                  "Yazılım Durumu  : $(if ($isInstalled) { "Kurulu (v$instVer)" } else { "Kurulu Değil" })"
+                                  "Yazılım Durumu  : $softwareStatus"
         $lblDetails.UseMnemonic = $false
         $card.Controls.Add($lblDetails)
 
@@ -1345,9 +1346,11 @@ $uiTimer.Add_Tick({
                 $boxMother.Label.Text  = "$($specs.Motherboard.Manufacturer) $($specs.Motherboard.Product)`r`nBIOS: $($specs.Motherboard.BIOSVersion)"
                 $boxNetwork.Label.Text = "$($specs.Network.Adapters.Count) Ağ Bağdaştırıcısı Aktif"
 
+                $secBootStr = if ($specs.Platform.SecureBoot) { "Aktif" } else { "Devre Dışı" }
+                $vmStr      = if ($specs.Platform.IsVirtualMachine) { "Evet" } else { "Fiziksel PC" }
                 $lblHealthBody.Text = "Form Faktör: $($specs.Platform.FormFactor)`r`n" +
-                    "Güvenli Önyükleme (Secure Boot): $(if ($specs.Platform.SecureBoot) { 'Aktif' } else { 'Devre Dışı' }) | " +
-                    "Sanal Makine: $(if ($specs.Platform.IsVirtualMachine) { 'Evet' } else { 'Fiziksel PC' })`r`n" +
+                    "Güvenli Önyükleme (Secure Boot): $secBootStr | " +
+                    "Sanal Makine: $vmStr`r`n" +
                     "Windows Sürümü: $($specs.OperatingSystem.Caption) ($($specs.OperatingSystem.BuildNumber))"
             }
         } catch {
@@ -1553,11 +1556,11 @@ $btnClose.Add_Click({
 })
 
 $form.Add_FormClosing({
-    param($sender, $e)
+    param($formObj, $closeEvent)
     if ($Script:IsRunning) {
         $r = [System.Windows.Forms.MessageBox]::Show("Kurulum süreci devam ediyor. Kapatmak istediğinizden emin misiniz?", "Uyarı", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
         if ($r -eq [System.Windows.Forms.DialogResult]::No) {
-            $e.Cancel = $true
+            $closeEvent.Cancel = $true
             return
         }
     }
