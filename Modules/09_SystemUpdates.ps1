@@ -66,60 +66,32 @@ foreach ($gpu in $gpus) {
     Write-Output "[INFO] GPU: $gpuName"
     Write-Output "[INFO] Kurulu Surucu Versiyonu: $driverVer"
 
-    # Identify Vendor
-    $vendorKey = "Virtual"
-    if ($gpuName -match "NVIDIA|GeForce|RTX|GTX|Quadro") { $vendorKey = "NVIDIA" }
-    elseif ($gpuName -match "AMD|Radeon") { $vendorKey = "AMD" }
-    elseif ($gpuName -match "Intel") { $vendorKey = "Intel" }
+    $gpuMatch = Find-GpuProfile -GpuName $gpuName -GpuDb $gpuDb
+    $matchedProfile = $gpuMatch.Profile
 
-    if ($gpuDb -and $gpuDb.Vendors.$vendorKey) {
-        $vendorData = $gpuDb.Vendors.$vendorKey
-        $matchedProfile = $null
+    if ($matchedProfile) {
+        Write-Output "[INFO] Uretici: $($gpuMatch.Vendor.VendorName)"
+        Write-Output "[INFO] Profil: $($matchedProfile.Name) [Tur: $($matchedProfile.Type)]"
+        Write-Output "[INFO] Onerilen Yazilim: $($matchedProfile.RecommendedApp)"
 
-        foreach ($profile in $vendorData.Profiles) {
-            if ($gpuName -match $profile.Pattern) {
-                $matchedProfile = $profile
-                break
-            }
-        }
-
-        if (-not $matchedProfile) {
-            $matchedProfile = $vendorData.Profiles | Select-Object -First 1
-        }
-
-        if ($matchedProfile) {
-            Write-Output "[INFO] Uretici: $($vendorData.VendorName)"
-            Write-Output "[INFO] Profil: $($matchedProfile.Name) [Tur: $($matchedProfile.Type)]"
-            Write-Output "[INFO] Onerilen Yazilim: $($matchedProfile.RecommendedApp)"
-
-            # Check if companion software is already installed
-            $checkInfo = Get-InstalledAppInfo -Name $matchedProfile.RecommendedApp -RegistryPattern $matchedProfile.RegistryDisplayName
-            if ($checkInfo.IsInstalled) {
-                Write-Output "[SUCCESS] Destek yazilimi zaten kurulu: $($checkInfo.DisplayName) ($($checkInfo.InstalledVersion))"
+        $checkInfo = Get-GpuCompanionStatus -GpuProfile $matchedProfile
+        if ($checkInfo.IsInstalled) {
+            Write-Output "[SUCCESS] Destek yazilimi zaten kurulu: $($checkInfo.DisplayName) ($($checkInfo.InstalledVersion))"
+        } elseif ($matchedProfile.WinGetId -or $matchedProfile.AltWinGetId) {
+            Write-Output "[INFO] Destek yazilimi kurulu degil. Kurulum baslatiliyor..."
+            $installRes = Install-GpuCompanionApp -GpuProfile $matchedProfile
+            if ($installRes.Success) {
+                Write-Output "[SUCCESS] $($matchedProfile.RecommendedApp) basariyla entegre edildi ($($installRes.TierUsed))."
             } else {
-                Write-Output "[INFO] Destek yazilimi kurulu degil. Kurulum baslatiliyor..."
-                $targetId = if ($matchedProfile.WinGetId) { $matchedProfile.WinGetId } else { $matchedProfile.AltWinGetId }
-
-                if ($targetId) {
-                    $installRes = Install-ResilientPackage `
-                        -Name $matchedProfile.RecommendedApp `
-                        -WingetId $targetId `
-                        -RegistryCheckPattern $matchedProfile.RegistryDisplayName `
-                        -DirectDownloadUrl $matchedProfile.DirectDownloadUrl
-                    
-                    if ($installRes.Success) {
-                        Write-Output "[SUCCESS] $($matchedProfile.RecommendedApp) basariyla entegre edildi."
-                    } else {
-                        Write-Output "[NOTE] Manuel indirme adresi: $($matchedProfile.DirectDownloadUrl)"
-                    }
-                }
+                Write-Output "[WARN] $($matchedProfile.RecommendedApp) otomatik kurulamadi. $($installRes.Details)"
             }
+        } elseif ($matchedProfile.ManualDownloadPage) {
+            Write-Output "[NOTE] Otomatik kaynak yok. Elle indirme: $($matchedProfile.ManualDownloadPage)"
         }
     } else {
         Write-Output "[INFO] Standart video bagdastiricisi algilandi."
     }
-}
-#endregion
+}#endregion
 
 #region === 2. MOTHERBOARD & CHIPSET DRIVERS ===
 Write-Output "`n[INFO] ===== 2. ANAKART VE YONTA KÜMESİ (CHIPSET) YONETIMI ====="

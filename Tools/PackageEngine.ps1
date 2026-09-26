@@ -212,6 +212,7 @@ function Install-ResilientPackage {
         [string]$RegistryCheckPattern = "",
         [string]$BinaryName = "",
         [string]$MinVersion = "",
+        [string]$AppXPackageName = "",
         [switch]$ForceReinstall,
         [switch]$AllowUnsignedDownload
     )
@@ -229,7 +230,7 @@ function Install-ResilientPackage {
 
     # --- Step 0: Smart App Version & Existence Pre-Check ---
     if (-not $ForceReinstall) {
-        $appInfo = Get-InstalledAppInfo -Name $Name -RegistryPattern $RegistryCheckPattern -BinaryName $BinaryName
+        $appInfo = Get-InstalledAppInfo -Name $Name -RegistryPattern $RegistryCheckPattern -BinaryName $BinaryName -AppXPackageName $AppXPackageName
 
         # WinGet's own inventory is authoritative when no version floor is requested
         if (-not $appInfo.IsInstalled -and [string]::IsNullOrWhiteSpace($MinVersion)) {
@@ -388,4 +389,67 @@ function Install-ResilientPackage {
     $result.Details = "Tum kurulum katmanlari (WinGet, CDN, Yerel) denendi ancak basarisiz oldu."
     Write-PackageLog "[WARN] [$Name] Kurulum tamamlanamadi."
     return $result
+}
+
+function Find-GpuProfile {
+    <#
+    .SYNOPSIS
+        Maps a Win32_VideoController name to its gpu_compatibility.json vendor + profile.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$GpuName,
+        $GpuDb
+    )
+    $vendorKey = "Virtual"
+    if ($GpuName -match "NVIDIA|GeForce|RTX|GTX|Quadro") { $vendorKey = "NVIDIA" }
+    elseif ($GpuName -match "AMD|Radeon") { $vendorKey = "AMD" }
+    elseif ($GpuName -match "Intel") { $vendorKey = "Intel" }
+
+    $matched = $null
+    if ($GpuDb -and $GpuDb.Vendors.$vendorKey) {
+        foreach ($p in $GpuDb.Vendors.$vendorKey.Profiles) {
+            if ($GpuName -match $p.Pattern) { $matched = $p; break }
+        }
+        if (-not $matched) { $matched = $GpuDb.Vendors.$vendorKey.Profiles | Select-Object -First 1 }
+    }
+    return [PSCustomObject]@{ VendorKey = $vendorKey; Vendor = $GpuDb.Vendors.$vendorKey; Profile = $matched }
+}
+
+function Get-GpuCompanionStatus {
+    param([Parameter(Mandatory)]$GpuProfile)
+    return (Get-InstalledAppInfo -Name $GpuProfile.RecommendedApp -RegistryPattern $GpuProfile.RegistryDisplayName -AppXPackageName $GpuProfile.AppxName)
+}
+
+function Install-GpuCompanionApp {
+    <#
+    .SYNOPSIS
+        Installs a GPU vendor companion app: primary id/source, then the alternative id/source.
+        When no automated source works, the vendor's manual download page is reported.
+    #>
+    param(
+        [Parameter(Mandatory)]$GpuProfile,
+        [switch]$ForceReinstall
+    )
+
+    $candidates = @()
+    if ($GpuProfile.WinGetId)    { $candidates += [PSCustomObject]@{ Id = $GpuProfile.WinGetId;    Source = $(if ($GpuProfile.WinGetSource) { $GpuProfile.WinGetSource } else { "winget" }) } }
+    if ($GpuProfile.AltWinGetId) { $candidates += [PSCustomObject]@{ Id = $GpuProfile.AltWinGetId; Source = $(if ($GpuProfile.AltWinGetSource) { $GpuProfile.AltWinGetSource } else { "winget" }) } }
+
+    $last = $null
+    foreach ($c in $candidates) {
+        Write-PackageLog "[INFO] [$($GpuProfile.RecommendedApp)] Kaynak: $($c.Source) / $($c.Id)"
+        $last = Install-ResilientPackage -Name $GpuProfile.RecommendedApp -WingetId $c.Id -WingetSource $c.Source `
+                    -RegistryCheckPattern $GpuProfile.RegistryDisplayName -AppXPackageName $GpuProfile.AppxName `
+                    -DirectDownloadUrl $GpuProfile.DirectDownloadUrl -ForceReinstall:$ForceReinstall
+        if ($last.Success) { return $last }
+    }
+
+    if (-not $last) {
+        $last = [PSCustomObject]@{ Name = $GpuProfile.RecommendedApp; Success = $false; TierUsed = "None"; ExitCode = -1
+                                   InstalledVersion = ""; ActionTaken = "None"; RebootRequired = $false; Details = "Otomatik kurulum kaynagi tanimli degil." }
+    }
+    if ($GpuProfile.ManualDownloadPage) {
+        $last.Details = "$($last.Details) Elle indirme: $($GpuProfile.ManualDownloadPage)"
+    }
+    return $last
 }

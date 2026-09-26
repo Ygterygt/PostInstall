@@ -1,7 +1,8 @@
 ﻿{
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "Version": "1.0.0",
-  "LastUpdated": "2026-09-26",
+  "Version": "1.1.0",
+  "LastUpdated": "2026-09-27",
+  "Notes": "Package ids verified with 'winget show --exact' on 2026-09-27. Pinned-version direct download URLs were removed: they rot (404/403) and vendors now ship companion apps via winget/Microsoft Store. ManualDownloadPage is shown to the user when every automated source fails.",
   "Vendors": {
     "NVIDIA": {
       "VendorId": "10DE",
@@ -13,30 +14,44 @@
           "Name": "NVIDIA GeForce RTX / GTX (Modern)",
           "Pattern": "(RTX|GTX 16|GTX 10[5-8]0|GeForce RTX [2345]0)",
           "RecommendedApp": "NVIDIA App",
-          "WinGetId": "Nvidia.NvidiaApp",
-          "AltWinGetId": "XP8CLZL93F5Z4P",
-          "DirectDownloadUrl": "https://tr.download.nvidia.com/nvapp/client/installer/NVIDIA_app_beta.exe",
-          "RegistryDisplayName": "NVIDIA (App|GeForce Experience)",
+          "WinGetId": "XP8CLZL93F5Z4P",
+          "WinGetSource": "msstore",
+          "AltWinGetId": "",
+          "AltWinGetSource": "",
+          "AppxName": "",
+          "RegistryDisplayName": "NVIDIA App",
+          "DirectDownloadUrl": "",
+          "ManualDownloadPage": "https://www.nvidia.com/en-us/software/nvidia-app/",
           "Type": "Gaming"
         },
         {
           "Id": "NVIDIA_LEGACY_GEFORCE",
           "Name": "NVIDIA GeForce Legacy (GTX 900 / 700 / 600)",
           "Pattern": "(GTX [679][0-9]0|GT [67][0-9]0)",
-          "RecommendedApp": "NVIDIA GeForce Experience",
-          "WinGetId": "Nvidia.GeForceExperience",
-          "DirectDownloadUrl": "https://us.download.nvidia.com/GFE/GFEClient/3.28.0.417/GeForce_Experience_v3.28.0.417.exe",
-          "RegistryDisplayName": "NVIDIA GeForce Experience",
+          "RecommendedApp": "NVIDIA Control Panel",
+          "WinGetId": "9NF8H0H7WMLT",
+          "WinGetSource": "msstore",
+          "AltWinGetId": "",
+          "AltWinGetSource": "",
+          "AppxName": "NVIDIAControlPanel",
+          "RegistryDisplayName": "NVIDIA Control Panel",
+          "DirectDownloadUrl": "",
+          "ManualDownloadPage": "https://www.nvidia.com/en-us/drivers/",
           "Type": "Legacy"
         },
         {
           "Id": "NVIDIA_PROFESSIONAL",
           "Name": "NVIDIA RTX Professional / Quadro",
           "Pattern": "(Quadro|RTX [0-9]000 Ada|RTX A[0-9]{3,4})",
-          "RecommendedApp": "NVIDIA RTX Desktop Manager",
-          "WinGetId": "Nvidia.RTXDesktopManager",
-          "DirectDownloadUrl": "https://www.nvidia.com/object/quadro-certified-drivers.html",
-          "RegistryDisplayName": "NVIDIA RTX Desktop Manager",
+          "RecommendedApp": "NVIDIA App",
+          "WinGetId": "XP8CLZL93F5Z4P",
+          "WinGetSource": "msstore",
+          "AltWinGetId": "",
+          "AltWinGetSource": "",
+          "AppxName": "",
+          "RegistryDisplayName": "NVIDIA App",
+          "DirectDownloadUrl": "",
+          "ManualDownloadPage": "https://www.nvidia.com/en-us/design-visualization/software/rtx-desktop-manager/",
           "Type": "Workstation"
         }
       ]
@@ -44,16 +59,21 @@
     "AMD": {
       "VendorId": "1002",
       "VendorName": "Advanced Micro Devices, Inc.",
-      "ControlPanelPackage": "AdvancedMicroDevicesInc.AMDSoftwareAdrenalinEdition",
+      "ControlPanelPackage": "9NZ1BJQN6BHL",
       "Profiles": [
         {
           "Id": "AMD_MODERN_RADEON",
           "Name": "AMD Radeon RX & RDNA iGPU (Adrenalin)",
-          "Pattern": "(RX [4-9][0-9]{2,3}|Radeon [6789][0-9]{2}M|Radeon Graphics|Radeon Vega|RDNA)",
-          "RecommendedApp": "AMD Software: Adrenalin Edition",
-          "WinGetId": "AdvancedMicroDevicesInc.AMDSoftwareAdrenalinEdition",
-          "DirectDownloadUrl": "https://drivers.amd.com/drivers/installer/24.10/beta/amd-software-adrenalin-edition-auto-detect-installer.exe",
+          "Pattern": "(RX [4-9][0-9]{2,3}|Radeon [6789][0-9]{2}M|Radeon(\\(TM\\))? Graphics|Radeon Vega|RDNA)",
+          "RecommendedApp": "AMD Radeon Software",
+          "WinGetId": "9NZ1BJQN6BHL",
+          "WinGetSource": "msstore",
+          "AltWinGetId": "",
+          "AltWinGetSource": "",
+          "AppxName": "AMDRadeonSoftware",
           "RegistryDisplayName": "AMD Software",
+          "DirectDownloadUrl": "",
+          "ManualDownloadPage": "https://www.amd.com/en/support/download/drivers.html",
           "Type": "Gaming"
         },
         {
@@ -61,9 +81,14 @@
           "Name": "AMD Radeon PRO Workstation",
           "Pattern": "(Radeon PRO|FirePro|W[0-9]{4})",
           "RecommendedApp": "AMD Software: PRO Edition",
-          "WinGetId": "AdvancedMicroDevicesInc.AMDSoftwarePROEdition",
-          "DirectDownloadUrl": "https://www.amd.com/en/support/download/drivers.html",
+          "WinGetId": "",
+          "WinGetSource": "",
+          "AltWinGetId": "",
+          "AltWinGetSource": "",
+          "AppxName": "",
           "RegistryDisplayName": "AMD Software: PRO Edition",
+          "DirectDownloadUrl": "",
+          "ManualDownloadPage": "https://www.amd.com/en/support/download/professional-graphics.html",
           "Type": "Workstation"
         }
       ]
@@ -71,16 +96,21 @@
     "Intel": {
       "VendorId": "8086",
       "VendorName": "Intel Corporation",
-      "ControlPanelPackage": "9PLFNLNT3G52",
+      "ControlPanelPackage": "9PLFNLNT3G5G",
       "Profiles": [
         {
           "Id": "INTEL_ARC_DISCRETE",
           "Name": "Intel Arc Discrete Graphics (A/B-Series)",
           "Pattern": "(Arc.*(A[0-9]{3}|B[0-9]{3})|Intel Arc)",
-          "RecommendedApp": "Intel Arc Control & Driver",
-          "WinGetId": "Intel.ArcControl",
-          "DirectDownloadUrl": "https://downloadmirror.intel.com/drivers/arc/gfx_win_101.5972.exe",
-          "RegistryDisplayName": "Intel Arc Control",
+          "RecommendedApp": "Intel Driver & Support Assistant (DSA)",
+          "WinGetId": "Intel.IntelDriverAndSupportAssistant",
+          "WinGetSource": "winget",
+          "AltWinGetId": "9PLFNLNT3G5G",
+          "AltWinGetSource": "msstore",
+          "AppxName": "",
+          "RegistryDisplayName": "Driver & Support Assistant",
+          "DirectDownloadUrl": "",
+          "ManualDownloadPage": "https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html",
           "Type": "Gaming"
         },
         {
@@ -89,8 +119,13 @@
           "Pattern": "(Iris.*Xe|UHD Graphics|HD Graphics)",
           "RecommendedApp": "Intel Driver & Support Assistant (DSA)",
           "WinGetId": "Intel.IntelDriverAndSupportAssistant",
-          "DirectDownloadUrl": "https://downloadmirror.intel.com/28425/a08/Intel-Driver-and-Support-Assistant-Installer.exe",
-          "RegistryDisplayName": "Intel Driver & Support Assistant",
+          "WinGetSource": "winget",
+          "AltWinGetId": "9PLFNLNT3G5G",
+          "AltWinGetSource": "msstore",
+          "AppxName": "",
+          "RegistryDisplayName": "Driver & Support Assistant",
+          "DirectDownloadUrl": "",
+          "ManualDownloadPage": "https://www.intel.com/content/www/us/en/support/detect.html",
           "Type": "General"
         }
       ]
@@ -105,8 +140,13 @@
           "Pattern": "(VMware SVGA|VirtualBox Graphics|Microsoft Hyper-V Video|Basic Display)",
           "RecommendedApp": "VM Guest Integrations / Tools",
           "WinGetId": "",
-          "DirectDownloadUrl": "",
+          "WinGetSource": "",
+          "AltWinGetId": "",
+          "AltWinGetSource": "",
+          "AppxName": "",
           "RegistryDisplayName": "Guest Additions|VMware Tools",
+          "DirectDownloadUrl": "",
+          "ManualDownloadPage": "",
           "Type": "Virtual"
         }
       ]

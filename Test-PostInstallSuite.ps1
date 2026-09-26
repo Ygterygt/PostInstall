@@ -143,7 +143,34 @@ Invoke-SuiteTest -Category "Configuration" -Name "gpu_compatibility.json Schema"
     foreach ($v in @("NVIDIA", "AMD", "Intel")) {
         Assert-True ($gpuJson.Vendors.$v.Profiles.Count -gt 0) "No profiles for $v"
     }
-    "NVIDIA ($($gpuJson.Vendors.NVIDIA.Profiles.Count)), AMD ($($gpuJson.Vendors.AMD.Profiles.Count)), Intel ($($gpuJson.Vendors.Intel.Profiles.Count))"
+    foreach ($v in $gpuJson.Vendors.PSObject.Properties) {
+        foreach ($p in $v.Value.Profiles) {
+            # Every package id needs an explicit, valid source (winget vs msstore were mixed up before)
+            foreach ($pair in @(@($p.WinGetId, $p.WinGetSource), @($p.AltWinGetId, $p.AltWinGetSource))) {
+                if ($pair[0]) { Assert-True ($pair[1] -in @("winget", "msstore")) "$($p.Id): id '$($pair[0])' has invalid source '$($pair[1])'" }
+            }
+            # Direct URLs must be installers, not web pages (web pages belong in ManualDownloadPage)
+            if ($p.DirectDownloadUrl) { Assert-True ($p.DirectDownloadUrl -match '\.(exe|msi)(\?|$)') "$($p.Id): DirectDownloadUrl is not an installer" }
+            Assert-True ([bool]$p.WinGetId -or [bool]$p.ManualDownloadPage -or $v.Name -eq "Virtual") "$($p.Id): no install source and no manual page"
+        }
+    }
+    "NVIDIA ($($gpuJson.Vendors.NVIDIA.Profiles.Count)), AMD ($($gpuJson.Vendors.AMD.Profiles.Count)), Intel ($($gpuJson.Vendors.Intel.Profiles.Count)); sources valid"
+}
+
+Invoke-SuiteTest -Category "Unit" -Name "Find-GpuProfile matching" -Body {
+    . (Join-Path $Root "Tools\PackageEngine.ps1")
+    $gpuJson = Get-Content -Path (Join-Path $Root "gpu_compatibility.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $cases = @{
+        "NVIDIA GeForce RTX 3050 Laptop GPU" = "NVIDIA_MODERN_GEFORCE"
+        "AMD Radeon(TM) Graphics"            = "AMD_MODERN_RADEON"
+        "Intel(R) Iris(R) Xe Graphics"       = "INTEL_IRIS_UHD"
+        "NVIDIA Quadro P2000"                = "NVIDIA_PROFESSIONAL"
+    }
+    foreach ($name in $cases.Keys) {
+        $got = (Find-GpuProfile -GpuName $name -GpuDb $gpuJson).Profile.Id
+        Assert-True ($got -eq $cases[$name]) "$name -> $got (expected $($cases[$name]))"
+    }
+    "$($cases.Count) GPU names mapped to the expected profiles"
 }
 
 Invoke-SuiteTest -Category "Portability" -Name "No hardcoded C:\PostInstall paths" -Body {

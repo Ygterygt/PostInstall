@@ -1198,32 +1198,20 @@ function Update-GpuCenterCard {
         $lblTitle.TextAlign   = [System.Drawing.ContentAlignment]::MiddleLeft
         $lblTitle.UseMnemonic = $false
 
-        # Match with GPU Database
-        $vendorKey = "Virtual"
-        if ($gpuName -match "NVIDIA|GeForce|RTX|GTX|Quadro") { $vendorKey = "NVIDIA" }
-        elseif ($gpuName -match "AMD|Radeon") { $vendorKey = "AMD" }
-        elseif ($gpuName -match "Intel") { $vendorKey = "Intel" }
+        # Match with GPU Database (shared with module 09)
+        $gpuMatch       = Find-GpuProfile -GpuName $gpuName -GpuDb $Script:GpuDb
+        $vendorKey      = $gpuMatch.VendorKey
+        $matchedProfile = $gpuMatch.Profile
+        $recApp         = if ($matchedProfile) { $matchedProfile.RecommendedApp } else { "Standart Sürücü" }
 
-        $recApp = "Standart Sürücü"
-        $matchedProfile = $null
-        if ($Script:GpuDb -and $Script:GpuDb.Vendors.$vendorKey) {
-            $vData = $Script:GpuDb.Vendors.$vendorKey
-            foreach ($p in $vData.Profiles) {
-                if ($gpuName -match $p.Pattern) { $matchedProfile = $p; break }
-            }
-            if (-not $matchedProfile) { $matchedProfile = $vData.Profiles | Select-Object -First 1 }
-            if ($matchedProfile) { $recApp = $matchedProfile.RecommendedApp }
-        }
-
-        # Check installed status
+        # Check installed status (Uninstall registry + Store/AppX packages)
         $isInstalled = $false
         $instVer = ""
         if ($matchedProfile) {
-            $chk = Get-InstalledAppInfo -Name $recApp -RegistryPattern $matchedProfile.RegistryDisplayName
+            $chk = Get-GpuCompanionStatus -GpuProfile $matchedProfile
             $isInstalled = $chk.IsInstalled
             $instVer = $chk.InstalledVersion
         }
-
         $softwareStatus = if ($isInstalled) { "Kurulu (v$instVer)" } else { "Kurulu Değil" }
         $lblDetails = New-Object System.Windows.Forms.Label
         $lblDetails.Font        = $Theme.FontCardTxt
@@ -1285,8 +1273,7 @@ function Update-GpuCenterCard {
                 param($p, $app, $q, $pkgPath)
                 try {
                     . $pkgPath
-                    $targetId = if ($p.WinGetId) { $p.WinGetId } else { $p.AltWinGetId }
-                    $res = Install-ResilientPackage -Name $app -WingetId $targetId -RegistryCheckPattern $p.RegistryDisplayName -DirectDownloadUrl $p.DirectDownloadUrl -ForceReinstall 6>&1 |
+                    $res = Install-GpuCompanionApp -GpuProfile $p -ForceReinstall 6>&1 |
                            ForEach-Object { if ($_ -is [System.Management.Automation.InformationRecord]) { $q.Enqueue("$_"); } else { $_ } }
                     $status = if ($res.Success) { "[SUCCESS] $app kurulum süreci tamamlandı ($($res.TierUsed))." } else { "[ERROR] $app kurulamadı: $($res.Details)" }
                     $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] $status")
