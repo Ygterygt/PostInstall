@@ -25,6 +25,16 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 #endregion
 
+#region --- Single Instance Guard ---
+# RunOnce resume + a manual start (or a double click) must never drive the engine twice
+$Script:InstanceMutexCreated = $false
+$Script:InstanceMutex = New-Object System.Threading.Mutex($true, "Global\ComputerMaintenancePro_UI", [ref]$Script:InstanceMutexCreated)
+if (-not $Script:InstanceMutexCreated) {
+    [System.Windows.Forms.MessageBox]::Show("Computer Maintenance Pro zaten çalışıyor.", "Zaten Açık", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+    exit 0
+}
+#endregion
+
 #region --- Bootstrap Engine & Tools ---
 $Script:UIRoot = if ($PSScriptRoot -and (Test-Path $PSScriptRoot)) {
     $PSScriptRoot
@@ -109,11 +119,22 @@ $Script:ActiveTab     = "Monitoring"
 
 $Script:TelemetryJob        = $null
 $Script:LastTelemetryUpdate = [DateTime]::MinValue
+$Script:TelemetryQueue      = New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]'
+$Script:TelemetryControl    = [hashtable]::Synchronized(@{ Stop = $false; Active = $true; RefreshNow = $false; IntervalMs = 2000 })
+$Script:BackgroundJobs      = New-Object System.Collections.Generic.List[object]
+$Script:OfflineListLoaded   = $false
 
 function Start-ScriptBlockAsync {
+    <#
+    .NOTES
+        The script block is re-created from its text inside the new runspace, so it never keeps
+        the UI runspace's session-state affinity. Pass everything it needs via -ArgumentList.
+        -Track registers the job for automatic EndInvoke/Dispose by the UI timer (fire-and-forget jobs).
+    #>
     param(
         [Parameter(Mandatory=$true)][scriptblock]$ScriptBlock,
-        [object[]]$ArgumentList = @()
+        [object[]]$ArgumentList = @(),
+        [switch]$Track
     )
     $rs = [runspacefactory]::CreateRunspace()
     $rs.ApartmentState = [System.Threading.ApartmentState]::STA
@@ -126,10 +147,23 @@ function Start-ScriptBlockAsync {
         [void]$ps.AddArgument($arg)
     }
     $async = $ps.BeginInvoke()
-    return [PSCustomObject]@{
+    $job = [PSCustomObject]@{
         Runspace    = $rs
         PowerShell  = $ps
         AsyncResult = $async
+    }
+    if ($Track) { $Script:BackgroundJobs.Add($job) }
+    return $job
+}
+
+function Clear-CompletedBackgroundJobs {
+    for ($i = $Script:BackgroundJobs.Count - 1; $i -ge 0; $i--) {
+        $job = $Script:BackgroundJobs[$i]
+        if ($job.AsyncResult.IsCompleted) {
+            try { [void]$job.PowerShell.EndInvoke($job.AsyncResult) } catch {}
+            Stop-ScriptBlockAsync $job
+            $Script:BackgroundJobs.RemoveAt($i)
+        }
     }
 }
 
@@ -154,7 +188,7 @@ function Stop-ScriptBlockAsync {
 
 #region --- Main Window Form ---
 $form = New-Object System.Windows.Forms.Form
-$form.Text            = "Computer Maintenance Pro - Enterprise System Care & Staging Suite v4.0.0"
+$form.Text            = "Computer Maintenance Pro - Enterprise System Care & Staging Suite v$($Script:Config.Version)"
 $form.Size            = New-Object System.Drawing.Size(1160, 760)
 $form.MinimumSize     = New-Object System.Drawing.Size(1024, 680)
 $form.StartPosition   = [System.Windows.Forms.FormStartPosition]::CenterScreen
@@ -180,7 +214,7 @@ $pnlTitleRow.BackColor = $Theme.BgHeader
 $pnlHeader.Controls.Add($pnlTitleRow)
 
 $lblTitle = New-Object System.Windows.Forms.Label
-$lblTitle.Text        = "  COMPUTER MAINTENANCE PRO v4.0"
+$lblTitle.Text        = "  COMPUTER MAINTENANCE PRO v$($Script:Config.Version)"
 $lblTitle.Font        = $Theme.FontTitle
 $lblTitle.ForeColor   = $Theme.AccentCyan
 $lblTitle.Dock        = [System.Windows.Forms.DockStyle]::Left
@@ -304,6 +338,8 @@ $tlpGauges.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System
 $tlpGauges.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 50))) | Out-Null
 $tlpGauges.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 50))) | Out-Null
 $pnlTabMon.Controls.Add($tlpGauges)
+# Fill must be front-most in z-order, otherwise the Top bar is laid over the first card row
+$tlpGauges.BringToFront()
 
 function New-MetricCard {
     param([string]$Title, [string]$BadgeText, [System.Drawing.Color]$BadgeColor)
@@ -733,7 +769,7 @@ $pnlP3TopBar.BackColor = $Theme.BgMain
 $pnlPage3.Controls.Add($pnlP3TopBar)
 
 $lblP3Title = New-Object System.Windows.Forms.Label
-$lblP3Title.Text        = "📦 Çevrimdışı ve Özel Yükleyiciler (C:\PostInstall\Installers)"
+$lblP3Title.Text        = "📦 Çevrimdışı ve Özel Yükleyiciler ($(Join-Path $Script:UIRoot 'Installers'))"
 $lblP3Title.Font        = $Theme.FontHeader
 $lblP3Title.ForeColor   = $Theme.AccentCyan
 $lblP3Title.Dock        = [System.Windows.Forms.DockStyle]::Left
@@ -796,6 +832,7 @@ function Update-OfflineInstallersList {
         $installers = Get-CustomInstallersList -Directory $instDir
     }
 
+    $Script:OfflineListLoaded = $true
     if ($installers -and $installers.Count -gt 0) {
         foreach ($inst in $installers) {
             $lvi = New-Object System.Windows.Forms.ListViewItem($inst.FileName)
@@ -919,6 +956,7 @@ $flpGpuCards.Dock        = [System.Windows.Forms.DockStyle]::Fill
 $flpGpuCards.AutoScroll  = $true
 $flpGpuCards.BackColor   = $Theme.BgMain
 $pnlTabGpu.Controls.Add($flpGpuCards)
+$flpGpuCards.BringToFront()
 #endregion
 
 # -------------------------------------------------------------------------------------------------
@@ -1232,36 +1270,48 @@ function Update-GpuCenterCard {
         $card.Controls.Add($btnRow)
         $card.Controls.Add($lblTitle)
 
-        # Event Handlers
-        $capturedProf = $matchedProfile
-        $capturedApp  = $recApp
-        $maintQueue   = $Script:MaintMsgQueue
+        # Event Handlers: click handlers are not closures, so per-card data travels on the button itself.
+        # (Reading loop variables inside the handler would always yield the LAST GPU's profile.)
+        $btnInstallGpu.Tag = [PSCustomObject]@{ Profile = $matchedProfile; App = $recApp }
         $btnInstallGpu.Add_Click({
+            $info = $this.Tag
             Switch-AppTab -TabName "Maintenance"
-            $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] GPU Destek Yazılımı Kurulumu: $capturedApp...`r`n")
-            Start-ScriptBlockAsync -ScriptBlock {
-                param($p, $app, $q)
-                if ($p -and $p.WinGetId) {
-                    & winget.exe install --id $p.WinGetId --silent --accept-package-agreements --accept-source-agreements
-                    $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] $app kurulum süreci tamamlandı.")
+            if (-not $info.Profile) {
+                $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] Bu GPU için tanımlı destek yazılımı yok.`r`n")
+                return
+            }
+            $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] GPU Destek Yazılımı Kurulumu: $($info.App)...`r`n")
+            Start-ScriptBlockAsync -Track -ScriptBlock {
+                param($p, $app, $q, $pkgPath)
+                try {
+                    . $pkgPath
+                    $targetId = if ($p.WinGetId) { $p.WinGetId } else { $p.AltWinGetId }
+                    $res = Install-ResilientPackage -Name $app -WingetId $targetId -RegistryCheckPattern $p.RegistryDisplayName -DirectDownloadUrl $p.DirectDownloadUrl -ForceReinstall 6>&1 |
+                           ForEach-Object { if ($_ -is [System.Management.Automation.InformationRecord]) { $q.Enqueue("$_"); } else { $_ } }
+                    $status = if ($res.Success) { "[SUCCESS] $app kurulum süreci tamamlandı ($($res.TierUsed))." } else { "[ERROR] $app kurulamadı: $($res.Details)" }
+                    $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] $status")
+                } catch {
+                    $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] $app kurulum hatası: $($_.Exception.Message)")
                 }
-            } -ArgumentList @($capturedProf, $capturedApp, $maintQueue) | Out-Null
+            } -ArgumentList @($info.Profile, $info.App, $Script:MaintMsgQueue, $Script:PackageEnginePath) | Out-Null
         })
 
         $btnExportDrv.Add_Click({
-            $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] Sistem sürücüleri C:\PostInstall\Backups\Drivers klasörüne yedekleniyor...`r`n")
-            $maintQ = $Script:MaintMsgQueue
-            $drvPath = $Script:DriverEnginePath
-            Start-ScriptBlockAsync -ScriptBlock {
+            $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] Sistem sürücüleri %ProgramData%\ComputerMaintenancePro\Backups\Drivers klasörüne yedekleniyor...`r`n")
+            Start-ScriptBlockAsync -Track -ScriptBlock {
                 param($path, $q)
                 try {
                     if (Test-Path $path) { . $path }
-                    Export-SystemDrivers | Out-Null
-                    $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] Sürücüler başarıyla yedeklendi.")
+                    $res = Export-SystemDrivers
+                    if ($res.Success) {
+                        $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] $($res.ExportedCount) sürücü yedeklendi: $($res.Destination)")
+                    } else {
+                        $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Sürücü yedekleme başarısız: $($res.ErrorMessage)")
+                    }
                 } catch {
                     $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Sürücü yedekleme hatası: $($_.Exception.Message)")
                 }
-            } -ArgumentList @($drvPath, $maintQ) | Out-Null
+            } -ArgumentList @($Script:DriverEnginePath, $Script:MaintMsgQueue) | Out-Null
         })
 
         $flpGpuCards.Controls.Add($card)
@@ -1281,19 +1331,23 @@ function Invoke-AsyncMaintenanceAction {
     $rtbMaintLog.AppendText("=======================================================`r`n")
     $rtbMaintLog.ScrollToCaret()
 
-    $q = $Script:MaintMsgQueue
-    $maintPath = $Script:MaintEnginePath
-    $jobBlock = $ActionBlock
-    Start-ScriptBlockAsync -ScriptBlock {
-        param($b, $queue, $name, $path)
+    # The action travels as TEXT and is re-created inside the worker runspace: a ScriptBlock object
+    # keeps affinity to the UI runspace, and invoking it from another thread is unsafe.
+    Start-ScriptBlockAsync -Track -ScriptBlock {
+        param($code, $queue, $name, $path)
         try {
             if (Test-Path $path) { . $path }
-            [void](& $b)
+            $action = [scriptblock]::Create($code)
+            # *>&1 captures Write-Output AND Write-Host (information stream) of the maintenance engine
+            . $action *>&1 | ForEach-Object {
+                $text = "$_".Trim()
+                if ($text) { $queue.Enqueue($text) }
+            }
             $queue.Enqueue("[SUCCESS] $name başarıyla tamamlandı.")
         } catch {
             $queue.Enqueue("[ERROR] $name sırasında hata: $($_.Exception.Message)")
         }
-    } -ArgumentList @($jobBlock, $q, $ActionName, $maintPath) | Out-Null
+    } -ArgumentList @($ActionBlock.ToString(), $Script:MaintMsgQueue, $ActionName, $Script:MaintEnginePath) | Out-Null
 }
 
 $mbtnTemp.Button.Add_Click({
@@ -1358,9 +1412,29 @@ $mbtnFull.Button.Add_Click({
 #endregion
 
 #region --- Installation Runspace (Wizard Tab) ---
+function Save-OfflineInstallerSelection {
+    <#
+    .SYNOPSIS
+        Hands the page-3 checkbox selection to module 10 via a file next to the engine state.
+    #>
+    param([switch]$Resume)
+    $selectionFile = Join-Path (Split-Path -Parent $Script:StateFile) "OfflineSelection.json"
+    if ($Script:OfflineListLoaded) {
+        $files = @($lstOffline.Items | Where-Object { $_.Checked -and $_.Tag } | ForEach-Object { $_.Tag.FileName })
+        [PSCustomObject]@{ SavedAt = (Get-Date -Format "o"); Files = $files } |
+            ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $selectionFile -Encoding UTF8
+    } elseif (-not $Resume -and (Test-Path $selectionFile)) {
+        # Express/auto run without visiting page 3: a stale selection from an old session must not filter
+        Remove-Item -LiteralPath $selectionFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Start-InstallationProcess {
+    param([switch]$Resume)
+
     $Script:IsRunning = $true
     Set-WizardPage 4
+    foreach ($lvi in $lstSteps.Items) { $lvi.SubItems[1].Text = "Bekliyor"; $lvi.SubItems[2].Text = "--"; $lvi.ForeColor = $Theme.TextPrimary }
 
     $selectedIds = @()
     for ($i = 0; $i -lt $clbSteps.Items.Count; $i++) {
@@ -1369,10 +1443,15 @@ function Start-InstallationProcess {
         }
     }
 
+    try { Save-OfflineInstallerSelection -Resume:$Resume } catch {
+        [System.Diagnostics.Trace]::WriteLine("Offline selection save warning: $($_.Exception.Message)")
+    }
+
     $capturedEnginePath = $Script:EnginePath
     $capturedMsgQueue   = $Script:MsgQueue
     $capturedStatusQ    = $Script:StatusQueue
     $capturedStepIds    = $selectedIds
+    $capturedResume     = [bool]$Resume
 
     $runspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
     $runspace.ApartmentState = [System.Threading.ApartmentState]::STA
@@ -1383,18 +1462,24 @@ function Start-InstallationProcess {
     $ps.Runspace = $runspace
 
     [void]$ps.AddScript({
-        param($EnginePath, $MsgQueue, $StatusQueue, $SelectedIds)
-        . $EnginePath
-        $callback = {
-            param($idx, $status)
-            $StatusQueue.Enqueue([PSCustomObject]@{ Index = $idx; Status = $status })
+        param($EnginePath, $MsgQueue, $StatusQueue, $SelectedIds, $Resume)
+        $finalStatus = "FAILED"
+        try {
+            . $EnginePath
+            $callback = {
+                param($idx, $status)
+                $StatusQueue.Enqueue([PSCustomObject]@{ Index = $idx; Status = $status })
+            }
+            $result = Start-PostInstallProcess -Queue $MsgQueue -StepStatusCallback $callback -SelectedStepIds $SelectedIds -Resume:$Resume
+            $finalStatus = switch ($result) {
+                "REBOOT"    { "REBOOT_TRIGGERED" }
+                "COMPLETED" { "COMPLETED"         }
+                default     { "FAILED"            }
+            }
+        } catch {
+            $MsgQueue.Enqueue("[ERROR] Motor beklenmeyen bir hata ile durdu: $($_.Exception.Message)")
         }
-        $result = Start-PostInstallProcess -Queue $MsgQueue -StepStatusCallback $callback -SelectedStepIds $SelectedIds
-        $finalStatus = switch ($result) {
-            "REBOOT"    { "REBOOT_TRIGGERED" }
-            "COMPLETED" { "COMPLETED"         }
-            default     { "FAILED"            }
-        }
+        # Always report a terminal status, otherwise the wizard would stay locked on page 4
         $StatusQueue.Enqueue([PSCustomObject]@{ Index = -1; Status = $finalStatus })
     })
 
@@ -1402,6 +1487,7 @@ function Start-InstallationProcess {
     [void]$ps.AddParameter("MsgQueue",    $capturedMsgQueue)
     [void]$ps.AddParameter("StatusQueue", $capturedStatusQ)
     [void]$ps.AddParameter("SelectedIds", $capturedStepIds)
+    [void]$ps.AddParameter("Resume",      $capturedResume)
 
     $asyncResult = $ps.BeginInvoke()
     $Script:WorkerPS     = $ps
@@ -1472,7 +1558,8 @@ $uiTimer.Add_Tick({
         if ([string]::IsNullOrEmpty($mMsg)) { continue }
         $rtbMaintLog.SelectionStart  = $rtbMaintLog.TextLength
         $rtbMaintLog.SelectionLength = 0
-        $rtbMaintLog.SelectionColor = if ($mMsg -match "\[SUCCESS\]") { $Theme.AccentGreen }
+        $rtbMaintLog.SelectionColor = if ($mMsg -match "\[SUCCESS\]|\[SKIP\]") { $Theme.AccentGreen }
+                                      elseif ($mMsg -match "\[WARN\]|\[UPGRADE\]") { $Theme.AccentAmber }
                                       elseif ($mMsg -match "\[ERROR\]") { $Theme.AccentRed }
                                       else { $Theme.TextPrimary }
         $rtbMaintLog.AppendText("$mMsg`r`n")
@@ -1489,155 +1576,212 @@ $uiTimer.Add_Tick({
         if ($idx -ge 0 -and $idx -lt $lstSteps.Items.Count) {
             $lvi = $lstSteps.Items[$idx]
             switch ($st) {
-                "Running" { $lvi.SubItems[1].Text = ">> Çalışıyor"; $lvi.ForeColor = $Theme.AccentCyan }
+                "Running" { $lvi.SubItems[1].Text = ">> Çalışıyor"; $lvi.ForeColor = $Theme.AccentCyan; $lvi.Tag = Get-Date }
                 "Success" { $lvi.SubItems[1].Text = "OK Başarılı";  $lvi.ForeColor = $Theme.AccentGreen }
                 "Warning" { $lvi.SubItems[1].Text = "!! Uyarı";    $lvi.ForeColor = $Theme.AccentAmber }
                 "Skipped" { $lvi.SubItems[1].Text = "-- Atlandı";   $lvi.ForeColor = $Theme.TextMuted }
                 "Failed"  { $lvi.SubItems[1].Text = "X Hata";      $lvi.ForeColor = $Theme.AccentRed }
             }
+            if ($st -in @("Success", "Warning", "Failed") -and $lvi.Tag -is [datetime]) {
+                $lvi.SubItems[2].Text = "{0:N0} sn" -f ((Get-Date) - $lvi.Tag).TotalSeconds
+            }
         }
 
-        if ($st -eq "COMPLETED") {
-            $Script:IsRunning = $false
-            try {
-                $stObj = Get-EngineState
-                $lblSummaryBody.Text = "Tüm adımlar başarıyla tamamlandı.`r`n`r`n" +
-                    "• Toplam Adım    : $($stObj.TotalSteps)`r`n" +
-                    "• Başarılı Adım  : $($stObj.CompletedSteps)`r`n" +
-                    "• Uyarı / Hata   : $($stObj.FailedSteps)`r`n" +
-                    "• Rapor Dosyası  : $($Script:Config.SummaryReport)"
-            } catch {
-                [System.Diagnostics.Trace]::WriteLine("Summary update warning: $($_.Exception.Message)")
-            }
-            Set-WizardPage 5
+        if ($idx -eq -1) {
+            Complete-WizardRun -Outcome $st
         }
     }
+
+    # 4. Dispose finished fire-and-forget runspaces (maintenance / GPU / driver jobs)
+    if ($Script:BackgroundJobs.Count -gt 0) { Clear-CompletedBackgroundJobs }
 })
 
-# Telemetry Sampling Timer (Fast 250ms UI ticker polling background worker)
+function Complete-WizardRun {
+    <#
+    .SYNOPSIS
+        Terminal state of an engine run: summary page for every outcome + reboot handling.
+    #>
+    param([string]$Outcome)
+
+    $Script:IsRunning = $false
+    try { if ($Script:WorkerPS) { [void]$Script:WorkerPS.EndInvoke($Script:WorkerResult) } } catch {}
+    try { if ($Script:WorkerPS) { $Script:WorkerPS.Dispose() }; if ($Script:WorkerRS) { $Script:WorkerRS.Close(); $Script:WorkerRS.Dispose() } } catch {}
+    $Script:WorkerPS = $null; $Script:WorkerRS = $null
+
+    $stObj = $null
+    try { $stObj = Get-EngineState } catch {}
+    $stats = if ($stObj) {
+        "• Toplam Adım    : $($stObj.TotalSteps)`r`n" +
+        "• Başarılı Adım  : $($stObj.CompletedSteps)`r`n" +
+        "• Hatalı Adım    : $($stObj.FailedSteps)`r`n" +
+        "• Atlanan Adım   : $(@($stObj.StepResults | Where-Object { $_.Status -eq 'Skipped' }).Count)`r`n"
+    } else { "" }
+
+    switch ($Outcome) {
+        "COMPLETED" {
+            $lblP5Title.Text      = "Kurulum Başarıyla Tamamlandı!"
+            $lblP5Title.ForeColor = $Theme.AccentGreen
+            $rebootNote = if ($stObj -and $stObj.RebootPending) { "`r`n⚠ Bazı bileşenler yeniden başlatma sonrası etkin olacak. Uygun bir zamanda bilgisayarı yeniden başlatın.`r`n" } else { "" }
+            $lblSummaryBody.Text  = "Tüm seçili adımlar işlendi.`r`n`r`n$stats• Rapor Dosyası  : $Script:SummaryReport`r`n$rebootNote"
+        }
+        "FAILED" {
+            $lblP5Title.Text      = "Kurulum Kritik Hata Nedeniyle Durdu"
+            $lblP5Title.ForeColor = $Theme.AccentRed
+            $failedStep = if ($stObj) { $stObj.StepResults | Where-Object { $_.Status -eq "Failed" } | Select-Object -First 1 } else { $null }
+            $failText   = if ($failedStep) { "• Hatalı Adım    : $($failedStep.Title)`r`n• Hata           : $($failedStep.ErrorMessage)`r`n" } else { "" }
+            $lblSummaryBody.Text  = "Ayrıntılar için 'Log Aç' butonunu kullanın.`r`n`r`n$stats$failText• Log Dosyası    : $Script:LogFile"
+        }
+        "REBOOT_TRIGGERED" {
+            $countdown = Get-RebootCountdownSeconds
+            $lblP5Title.Text      = "Yeniden Başlatma Gerekiyor"
+            $lblP5Title.ForeColor = $Theme.AccentAmber
+            $lblSummaryBody.Text  = "Kurulum duraklatıldı. Bilgisayar yeniden başladığında kaldığı adımdan otomatik devam edecek.`r`n`r`n$stats"
+            Set-WizardPage 5
+
+            if ($Script:Config.AutoReboot -ne $false) {
+                & shutdown.exe /r /t $countdown /c "Computer Maintenance Pro: Kurulum devam icin yeniden baslama." | Out-Null
+                $r = [System.Windows.Forms.MessageBox]::Show("Bilgisayar $countdown saniye içinde yeniden başlatılacak.`r`n`r`nİptal etmek için 'İptal' seçin (kurulum bir sonraki oturum açılışında devam eder).", "Yeniden Başlatma", [System.Windows.Forms.MessageBoxButtons]::OKCancel, [System.Windows.Forms.MessageBoxIcon]::Warning)
+                if ($r -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                    & shutdown.exe /a | Out-Null
+                    $lblNavStatus.Text = "Yeniden başlatma iptal edildi. Kurulum sonraki oturum açılışında devam edecek."
+                }
+            } else {
+                $r = [System.Windows.Forms.MessageBox]::Show("Kuruluma devam etmek için yeniden başlatma gerekiyor. Şimdi yeniden başlatılsın mı?", "Yeniden Başlatma", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+                if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { & shutdown.exe /r /t 5 | Out-Null }
+            }
+            return
+        }
+    }
+    Set-WizardPage 5
+}
+
+# Telemetry: ONE long-lived sampler runspace keeps the hardware cache and the (rate based)
+# performance counters alive between samples. The 250ms UI timer only drains its queue.
+function Start-TelemetrySampler {
+    $Script:TelemetryJob = Start-ScriptBlockAsync -ScriptBlock {
+        param($path, $queue, $ctl)
+        try {
+            . $path
+            [void](Initialize-HardwareMonitorEngine)
+        } catch {
+            return
+        }
+        while (-not $ctl.Stop) {
+            if ($ctl.Active -or $ctl.RefreshNow) {
+                $ctl.RefreshNow = $false
+                try { $queue.Enqueue((Get-LiveTelemetrySample)) } catch {}
+                $drop = $null
+                while ($queue.Count -gt 3) { [void]$queue.TryDequeue([ref]$drop) }
+            }
+            # Sleep in small slices so Stop / RefreshNow react quickly
+            $waited = 0
+            while ($waited -lt $ctl.IntervalMs -and -not $ctl.Stop -and -not $ctl.RefreshNow) {
+                Start-Sleep -Milliseconds 100
+                $waited += 100
+            }
+        }
+    } -ArgumentList @($Script:HwMonEnginePath, $Script:TelemetryQueue, $Script:TelemetryControl)
+}
+
+function Stop-TelemetrySampler {
+    $Script:TelemetryControl.Stop = $true
+    if ($Script:TelemetryJob) {
+        $deadline = (Get-Date).AddSeconds(2)
+        while (-not $Script:TelemetryJob.AsyncResult.IsCompleted -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 50 }
+        Stop-ScriptBlockAsync $Script:TelemetryJob
+        $Script:TelemetryJob = $null
+    }
+}
+
 $telemetryTimer = New-Object System.Windows.Forms.Timer
 $telemetryTimer.Interval = 250
 
 $telemetryTimer.Add_Tick({
-    # If not on monitoring tab and initial data is already shown, idle
-    if ($Script:ActiveTab -ne "Monitoring" -and $Script:LastTelemetryUpdate -gt [DateTime]::MinValue) {
-        return
-    }
+    # Sample only while the monitoring tab is visible (plus the very first sample)
+    $Script:TelemetryControl.Active = ($Script:ActiveTab -eq "Monitoring" -or $Script:LastTelemetryUpdate -eq [DateTime]::MinValue)
 
-    # Check if active background query finished
-    if ($Script:TelemetryJob -and $Script:TelemetryJob.AsyncResult.IsCompleted) {
-        try {
-            $rawRes = $Script:TelemetryJob.PowerShell.EndInvoke($Script:TelemetryJob.AsyncResult)
-            $s = $rawRes | Select-Object -Last 1
-        } catch {
-            [System.Diagnostics.Trace]::WriteLine("Telemetry end invoke error: $($_.Exception.Message)")
-            $s = $null
+    $s = $null
+    $next = $null
+    while ($Script:TelemetryQueue.TryDequeue([ref]$next)) { $s = $next }
+
+    if ($s) {
+        $Script:LastTelemetryUpdate = Get-Date
+
+        # CPU
+        $cardCpu.ValueLabel.Text   = "$($s.CpuLoadPct) %"
+        $cardCpu.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$s.CpuLoadPct))
+        $tempStr = if ($s.CpuTempC) { "$($s.CpuTempC) °C" } else { "Sensör Yok" }
+        $cardCpu.SubLabel.Text     = "Sıcaklık: $tempStr | Saat: $($s.CpuClockGhz) GHz`r`n$($s.CpuCores) Çekirdek / $($s.CpuThreads) İzlek"
+        if ($s.CpuTempC -gt 80) { $cardCpu.ValueLabel.ForeColor = $Theme.AccentRed }
+        elseif ($s.CpuTempC -gt 65) { $cardCpu.ValueLabel.ForeColor = $Theme.AccentAmber }
+        else { $cardCpu.ValueLabel.ForeColor = $Theme.AccentCyan }
+
+        # RAM
+        $cardRam.ValueLabel.Text   = "$($s.RamLoadPct) %"
+        $cardRam.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$s.RamLoadPct))
+        $cardRam.SubLabel.Text     = "Kullanılan: $($s.RamUsedGB) GB / $($s.RamTotalGB) GB`r`nBoş Bellek: $($s.RamFreeGB) GB"
+
+        # Discrete GPU
+        $dgpu = $s.GPUs | Where-Object { $_.IsDiscrete } | Select-Object -First 1
+        if ($dgpu) {
+            $cardGpuD.ValueLabel.Text   = "$($dgpu.LoadPercentage) %"
+            $cardGpuD.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$dgpu.LoadPercentage))
+            $gTemp = if ($dgpu.TemperatureC) { "$($dgpu.TemperatureC) °C" } else { "--" }
+            $cardGpuD.SubLabel.Text     = "$($dgpu.Name)`r`nSıcaklık: $gTemp | VRAM: $($dgpu.VramUsedMB) / $($dgpu.VramTotalMB) MB"
+        } else {
+            $cardGpuD.ValueLabel.Text = "Yok"
+            $cardGpuD.SubLabel.Text   = "Harici grafik kartı algılanmadı"
         }
-        Stop-ScriptBlockAsync $Script:TelemetryJob
-        $Script:TelemetryJob = $null
 
-        if ($s) {
-            $Script:LastTelemetryUpdate = Get-Date
-
-            # CPU
-            $cardCpu.ValueLabel.Text   = "$($s.CpuLoadPct) %"
-            $cardCpu.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$s.CpuLoadPct))
-            $tempStr = if ($s.CpuTempC) { "$($s.CpuTempC) °C" } else { "Sensör Yok" }
-            $cardCpu.SubLabel.Text     = "Sıcaklık: $tempStr | Saat: $($s.CpuClockGhz) GHz`r`n$($s.CpuCores) Çekirdek / $($s.CpuThreads) İzlek"
-            if ($s.CpuTempC -gt 80) { $cardCpu.ValueLabel.ForeColor = $Theme.AccentRed }
-            elseif ($s.CpuTempC -gt 65) { $cardCpu.ValueLabel.ForeColor = $Theme.AccentAmber }
-            else { $cardCpu.ValueLabel.ForeColor = $Theme.AccentCyan }
-
-            # RAM
-            $cardRam.ValueLabel.Text   = "$($s.RamLoadPct) %"
-            $cardRam.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$s.RamLoadPct))
-            $cardRam.SubLabel.Text     = "Kullanılan: $($s.RamUsedGB) GB / $($s.RamTotalGB) GB`r`nBoş Bellek: $($s.RamFreeGB) GB"
-
-            # Discrete GPU
-            $dgpu = $s.GPUs | Where-Object { $_.IsDiscrete } | Select-Object -First 1
-            if ($dgpu) {
-                $cardGpuD.ValueLabel.Text   = "$($dgpu.LoadPercentage) %"
-                $cardGpuD.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$dgpu.LoadPercentage))
-                $gTemp = if ($dgpu.TemperatureC) { "$($dgpu.TemperatureC) °C" } else { "--" }
-                $cardGpuD.SubLabel.Text     = "$($dgpu.Name)`r`nSıcaklık: $gTemp | VRAM: $($dgpu.VramUsedMB) / $($dgpu.VramTotalMB) MB"
-            } else {
-                $cardGpuD.ValueLabel.Text = "Yok"
-                $cardGpuD.SubLabel.Text   = "Harici grafik kartı algılanmadı"
-            }
-
-            # Integrated GPU
-            $igpu = $s.GPUs | Where-Object { -not $_.IsDiscrete } | Select-Object -First 1
-            if ($igpu) {
-                $cardGpuI.ValueLabel.Text   = "$($igpu.LoadPercentage) %"
-                $cardGpuI.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$igpu.LoadPercentage))
-                $cardGpuI.SubLabel.Text     = "$($igpu.Name)`r`nVRAM: $($igpu.VramTotalMB) MB"
-            } else {
-                $cardGpuI.ValueLabel.Text = "--"
-                $cardGpuI.SubLabel.Text   = "Dahili grafik yok"
-            }
-
-            # Storage (Primary C: drive)
-            $cDrive = $s.Disks | Where-Object { $_.DriveLetter -like "C*" } | Select-Object -First 1
-            if ($cDrive) {
-                $cardDisk.ValueLabel.Text   = "$($cDrive.LoadPercentage) %"
-                $cardDisk.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$cDrive.LoadPercentage))
-                $diskLines = ($s.Disks | ForEach-Object { "$($_.DriveLetter) Boş: $($_.FreeGB)/$($_.TotalGB) GB" }) -join " | "
-                $cardDisk.SubLabel.Text     = "$diskLines"
-            }
-
-            # Battery
-            if ($s.Battery.HasBattery) {
-                $cardBat.ValueLabel.Text   = "$($s.Battery.ChargePct) %"
-                $cardBat.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$s.Battery.ChargePct))
-                $cardBat.SubLabel.Text     = "Durum: $($s.Battery.Status)`r`nAC Adaptör / Mobil Çalışma"
-            } else {
-                $cardBat.ValueLabel.Text   = "AC Güç"
-                $cardBat.ProgressBar.Value = 100
-                $cardBat.SubLabel.Text     = "Masaüstü İş İstasyonu (Pil Yok)"
-            }
-
-            $lblMonStatus.Text = "Canlı Donanım & Performans Telemetrisi (Yenilenme: 2 sn | $($s.Timestamp))"
+        # Integrated GPU
+        $igpu = $s.GPUs | Where-Object { -not $_.IsDiscrete } | Select-Object -First 1
+        if ($igpu) {
+            $cardGpuI.ValueLabel.Text   = "$($igpu.LoadPercentage) %"
+            $cardGpuI.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$igpu.LoadPercentage))
+            $cardGpuI.SubLabel.Text     = "$($igpu.Name)`r`nVRAM: $($igpu.VramTotalMB) MB"
+        } else {
+            $cardGpuI.ValueLabel.Text = "--"
+            $cardGpuI.SubLabel.Text   = "Dahili grafik yok"
         }
-    }
 
-    # Dispatch background query if none running and 2.0s elapsed (or initial load)
-    $elapsedSec = ((Get-Date) - $Script:LastTelemetryUpdate).TotalSeconds
-    if ($null -eq $Script:TelemetryJob -and ($elapsedSec -ge 2.0 -or $Script:LastTelemetryUpdate -eq [DateTime]::MinValue)) {
-        $hwPath = $Script:HwMonEnginePath
-        $Script:TelemetryJob = Start-ScriptBlockAsync -ScriptBlock {
-            param($path)
-            try {
-                if (Test-Path $path) { . $path }
-                return (Get-LiveTelemetrySample)
-            } catch {
-                return $null
-            }
-        } -ArgumentList @($hwPath)
+        # Storage (Primary C: drive)
+        $cDrive = $s.Disks | Where-Object { $_.DriveLetter -like "C*" } | Select-Object -First 1
+        if ($cDrive) {
+            $cardDisk.ValueLabel.Text   = "$($cDrive.LoadPercentage) %"
+            $cardDisk.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$cDrive.LoadPercentage))
+            $diskLines = ($s.Disks | ForEach-Object { "$($_.DriveLetter) Boş: $($_.FreeGB)/$($_.TotalGB) GB" }) -join " | "
+            $cardDisk.SubLabel.Text     = "$diskLines"
+        }
+
+        # Battery
+        if ($s.Battery.HasBattery) {
+            $cardBat.ValueLabel.Text   = "$($s.Battery.ChargePct) %"
+            $cardBat.ProgressBar.Value = [Math]::Min(100, [Math]::Max(0, [int]$s.Battery.ChargePct))
+            $cardBat.SubLabel.Text     = "Durum: $($s.Battery.Status)`r`nAC Adaptör / Mobil Çalışma"
+        } else {
+            $cardBat.ValueLabel.Text   = "AC Güç"
+            $cardBat.ProgressBar.Value = 100
+            $cardBat.SubLabel.Text     = "Masaüstü İş İstasyonu (Pil Yok)"
+        }
+
+        $lblMonStatus.Text = "Canlı Donanım & Performans Telemetrisi (Yenilenme: 2 sn | $($s.Timestamp))"
     }
 })
 
 $btnRefreshMon.Add_Click({
     $lblMonStatus.Text = "Canlı Donanım & Performans Telemetrisi (Yenileniyor...)"
-    if ($Script:TelemetryJob) {
-        Stop-ScriptBlockAsync $Script:TelemetryJob
-        $Script:TelemetryJob = $null
+    if (-not $Script:TelemetryJob -or $Script:TelemetryJob.AsyncResult.IsCompleted) {
+        if ($Script:TelemetryJob) { Stop-ScriptBlockAsync $Script:TelemetryJob }
+        $Script:TelemetryControl.Stop = $false
+        Start-TelemetrySampler
     }
-    $hwPath = $Script:HwMonEnginePath
-    $Script:TelemetryJob = Start-ScriptBlockAsync -ScriptBlock {
-        param($path)
-        try {
-            if (Test-Path $path) { . $path }
-            return (Get-LiveTelemetrySample)
-        } catch {
-            return $null
-        }
-    } -ArgumentList @($hwPath)
+    $Script:TelemetryControl.RefreshNow = $true
 })
 #endregion
 
 #region --- Standard Button Handlers & Form Lifecycle ---
 $btnOpenLog.Add_Click({
-    $logPath = $Script:Config.LogFile
+    $logPath = $Script:LogFile
     if (Test-Path $logPath) { Start-Process "notepad.exe" -ArgumentList "`"$logPath`"" }
 })
 
@@ -1658,15 +1802,22 @@ $form.Add_FormClosing({
     try { $uiTimer.Stop() } catch {}
     try { $telemetryTimer.Stop() } catch {}
 
-    if ($Script:TelemetryJob) {
-        Stop-ScriptBlockAsync $Script:TelemetryJob
-        $Script:TelemetryJob = $null
-    }
+    # Each cleanup step is isolated: an exception escaping a WinForms event handler
+    # surfaces as the .NET "unhandled exception" dialog instead of a clean exit.
+    try { Stop-TelemetrySampler } catch {}
+    # NOTE: never use @() on a List[object] here - Windows PowerShell 5.1 throws
+    # "Argument types do not match" (PSToObjectArrayBinder). ToArray() is safe.
+    try {
+        foreach ($job in $Script:BackgroundJobs.ToArray()) { Stop-ScriptBlockAsync $job }
+        $Script:BackgroundJobs.Clear()
+    } catch {}
 
-    if ($Script:SpecsJob) {
-        Stop-ScriptBlockAsync $Script:SpecsJob
-        $Script:SpecsJob = $null
-    }
+    try {
+        if ($Script:SpecsJob) {
+            Stop-ScriptBlockAsync $Script:SpecsJob
+            $Script:SpecsJob = $null
+        }
+    } catch {}
 
     try {
         if ($Script:WorkerPS) { $Script:WorkerPS.Stop(); $Script:WorkerPS.Dispose() }
@@ -1674,6 +1825,7 @@ $form.Add_FormClosing({
     } catch {
         [System.Diagnostics.Trace]::WriteLine("Form closing cleanup warning: $($_.Exception.Message)")
     }
+    try { $Script:InstanceMutex.ReleaseMutex(); $Script:InstanceMutex.Dispose() } catch {}
 })
 
 $form.Add_FormClosed({
@@ -1690,7 +1842,8 @@ if ($Resume -or $Auto) {
         Switch-AppTab -TabName "Wizard"
         Start-Sleep -Milliseconds 600
         for ($i = 0; $i -lt $clbSteps.Items.Count; $i++) { $clbSteps.SetItemChecked($i, $true) }
-        Start-InstallationProcess
+        # -Resume: engine continues the persisted session and restores its original step selection
+        Start-InstallationProcess -Resume:$Resume
     })
 } else {
     Switch-AppTab -TabName "Monitoring"
@@ -1708,6 +1861,7 @@ $form.Add_Shown({
 })
 
 $uiTimer.Start()
+Start-TelemetrySampler
 $telemetryTimer.Start()
 [System.Windows.Forms.Application]::Run($form)
 [System.Environment]::Exit(0)

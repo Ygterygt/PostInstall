@@ -12,7 +12,7 @@
 function New-SystemSnapshot {
     param(
         [string]$Description = "Antigravity PostInstall Pre-Execution Snapshot",
-        [string]$BackupDir   = "C:\PostInstall\Backups"
+        [string]$BackupDir   = (Join-Path $env:ProgramData "ComputerMaintenancePro\Backups")
     )
 
     $result = @{
@@ -103,7 +103,7 @@ function New-SystemSnapshot {
 }
 
 function Restore-RegistrySnapshot {
-    param([string]$BackupDir = "C:\PostInstall\Backups")
+    param([string]$BackupDir = (Join-Path $env:ProgramData "ComputerMaintenancePro\Backups"))
 
     Write-Output "[INFO] Kayit Defteri ve Ortam Degiskenleri yedekten geri yukleniyor ($BackupDir)..."
     if (-not (Test-Path $BackupDir)) {

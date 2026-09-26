@@ -1,0 +1,12 @@
+# Batch files must keep CRLF: cmd.exe mis-parses labels/:: comments with LF-only endings
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+*.ps1   text
+*.psd1  text
+*.json  text
+*.md    text
+*.cs    text
+
+*.exe   binary
+*.png   binary

@@ -14,6 +14,8 @@
       - Disks: NVMe M.2, SATA SSD, HDD, Storage Spaces across all drive letters
 #>
 
+. (Join-Path $PSScriptRoot "Common.ps1")
+
 function Get-SystemHealthSummary {
     $osInfo   = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
     $cpuInfo  = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -109,8 +111,9 @@ function Get-SystemHealthSummary {
     $totalRamBytes = ($ramList | Measure-Object -Property Capacity -Sum).Sum
     $totalRamGB = if ($totalRamBytes) { [math]::Round($totalRamBytes / 1GB, 1) } else { [math]::Round($cs.TotalPhysicalMemory / 1GB, 1) }
     $ramStick = $ramList | Select-Object -First 1
-    $ramSpeedActual = if ($ramStick.ConfiguredClockSpeed) { $ramStick.ConfiguredClockSpeed * 2 } elseif ($ramStick.Speed) { $ramStick.Speed } else { 0 }
-    $ramSpeedRated  = if ($ramStick.Speed) { $ramStick.Speed } else { $ramSpeedActual }
+    $memInfo  = ConvertTo-MemorySpeedInfo -RatedSpeed ([int]$ramStick.Speed) -ConfiguredClockSpeed ([int]$ramStick.ConfiguredClockSpeed)
+    $ramSpeedActual = $memInfo.ActualMTs
+    $ramSpeedRated  = $memInfo.RatedMTs
 
     # 4. CPU Vendor Detection
     $cpuVendor = if ($cpuInfo.Manufacturer -like "*AMD*" -or $cpuInfo.Name -like "*AMD*") { "AMD" }
@@ -137,12 +140,12 @@ function Get-SystemHealthSummary {
     $warnings = @()
 
     # RAM XMP check
-    $isXmpActive = ($ramSpeedActual -ge 2933 -or ($ramSpeedRated -gt 0 -and $ramSpeedActual -ge $ramSpeedRated))
-    if ($ramSpeedRated -gt $ramSpeedActual -and $ramSpeedActual -lt 2933 -and -not $isVM) {
+    $isXmpActive = -not $memInfo.BelowRatedSpeed
+    if ($memInfo.BelowRatedSpeed -and -not $isVM) {
         $warnings += [PSCustomObject]@{
             Category = "RAM Bellek"
             Level    = "UYARI"
-            Message  = "RAM bellekleriniz nominal $ramSpeedRated MHz desteklemesine ragmen su an $ramSpeedActual MHz'de calisiyor. BIOS'tan XMP / DOCP / EXPO profilini acmaniz onerilir."
+            Message  = "RAM bellekleriniz nominal $ramSpeedRated MT/s desteklemesine ragmen su an $ramSpeedActual MT/s hizinda calisiyor. BIOS'tan XMP / DOCP / EXPO profilini acmaniz onerilir."
         }
     }
 
@@ -192,8 +195,8 @@ function Get-SystemHealthSummary {
         Motherboard    = "$mbMaker $mbModel".Trim()
         BIOSVersion    = "$($biosInfo.SMBIOSBIOSVersion) ($biosDateStr)"
         RAMTotal       = "$totalRamGB GB"
-        RAMSpeedActual = "$ramSpeedActual MHz"
-        RAMSpeedRated  = "$ramSpeedRated MHz"
+        RAMSpeedActual = "$ramSpeedActual MT/s"
+        RAMSpeedRated  = "$ramSpeedRated MT/s"
         IsXmpActive    = $isXmpActive
         GPU            = $primaryGpuDesc
         GPUVendor      = if ($primaryGpu) { $primaryGpu.Vendor } else { "Bilinmiyor" }

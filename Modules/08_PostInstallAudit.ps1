@@ -12,6 +12,8 @@
 param()
 
 $ErrorActionPreference = "Continue"
+. (Join-Path (Split-Path -Parent $PSScriptRoot) "Tools\Common.ps1")
+$cfg = Get-SuiteConfig
 
 function Test-ExeInPath {
     param([string]$Command)
@@ -85,12 +87,13 @@ $net4Release = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\N
 
 # Power plan
 $currentPlan = (powercfg /getactivescheme 2>&1) -join ""
-$isHighPerf  = ($currentPlan -like "*8c5e7fda*" -or $isLaptop)
+# Laptops are expected on Balanced (battery), desktops on High Performance
+$isHighPerf  = if ($isLaptop) { $currentPlan -like "*381b4222*" -or $currentPlan -like "*8c5e7fda*" } else { $currentPlan -like "*8c5e7fda*" -or $currentPlan -like "*e9a42b02*" }
 
 # RAM XMP status
-$ram = Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue | Select-Object -First 1
-$ramSpeedActual = if ($ram.ConfiguredClockSpeed) { $ram.ConfiguredClockSpeed * 2 } elseif ($ram.Speed) { $ram.Speed } else { 0 }
-$ramSpeedRated  = if ($ram.Speed) { $ram.Speed } else { $ramSpeedActual }
+$memInfo = Get-MemorySpeedInfo
+$ramSpeedActual = $memInfo.ActualMTs
+$ramSpeedRated  = $memInfo.RatedMTs
 
 # Storage
 $volumes = Get-Volume -ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter } | Sort-Object DriveLetter
@@ -107,7 +110,7 @@ $checks = @(
     @{ Label = "VS Code";               OK = $codeOk;                 Detail = if ($codeOk) { "Kurulu" } else { "Kurulu degil" } },
     @{ Label = "7-Zip";                 OK = $sevenZOk;               Detail = if ($sevenZOk) { Get-InstalledVersion "7z" } else { "Kurulu degil" } },
     @{ Label = "winget Paket Yoneticisi";OK = $wingetOk;              Detail = if ($wingetOk) { Get-InstalledVersion "winget" } else { "Bulunamadi" } },
-    @{ Label = "Guc ve Enerji Profili"; OK = $isHighPerf;             Detail = if ($isLaptop) { "Laptop Uyumlu (Prizde Max, Pilde Dengeli)" } else { "Yuksek Performans Aktif" } }
+    @{ Label = "Guc ve Enerji Profili"; OK = $isHighPerf;             Detail = if ($isLaptop) { "Laptop: Dengeli plan (pil dostu)" } else { "Masaustu: Yuksek Performans" } }
 )
 
 Write-Output "[INFO] --- Dogrulama Sonuclari ---"
@@ -157,7 +160,7 @@ $reportContent = @"
 | **Isletim Sistemi** | $osCaption |
 | **Kasa Tipi / Form Factor** | $chassisStr |
 | **Islemci (CPU)** | $cpuName ($cores) |
-| **RAM Calisma Frekansi** | $ramSpeedActual MHz (Nominal: $ramSpeedRated MHz) |
+| **RAM Calisma Hizi** | $ramSpeedActual MT/s (Nominal: $ramSpeedRated MT/s) |
 | **Grafik Birimleri (GPU)** | $gpuNames |
 | **.NET Framework** | $net4Friendly |
 | **Ag / Etki Alani** | $domain |
@@ -184,9 +187,9 @@ $volumeRows
 
 | Dosya | Yer |
 | :--- | :--- |
-| Ana Kurulum Gunlugu | ``C:\Windows\Temp\PostInstall.log`` |
-| Hata Gunlugu | ``C:\Windows\Temp\PostInstall_Error.log`` |
-| Durum Dosyasi (JSON) | ``C:\Windows\Temp\PostInstall_State.json`` |
+| Ana Kurulum Gunlugu | ``$($cfg.LogFile)`` |
+| Hata Gunlugu | ``$($cfg.ErrorLogFile)`` |
+| Durum Dosyasi (JSON) | ``$($cfg.StateFile)`` |
 
 ---
 
@@ -196,21 +199,14 @@ $volumeRows
 
 # Write report - BOM-free UTF-8
 $reportEncoding = New-Object System.Text.UTF8Encoding($false)
-$summaryPath = "C:\Windows\Temp\PostInstall_Summary.md"
+$summaryPath = $cfg.SummaryReport
+$summaryDir = Split-Path -Parent $summaryPath
+if (-not (Test-Path $summaryDir)) { New-Item -Path $summaryDir -ItemType Directory -Force | Out-Null }
 [System.IO.File]::WriteAllText($summaryPath, $reportContent, $reportEncoding)
 Write-Output "[SUCCESS] Ozet rapor olusturuldu: $summaryPath"
 
 # Sync to Docs directory from config or fallback
-$docsDir = $null
-$configFile = "C:\PostInstall\config.json"
-if (Test-Path $configFile) {
-    try {
-        $cfg = Get-Content $configFile -Raw | ConvertFrom-Json
-        if ($cfg.DocsSyncPath) {
-            $docsDir = [System.Environment]::ExpandEnvironmentVariables($cfg.DocsSyncPath)
-        }
-    } catch {}
-}
+$docsDir = $cfg.DocsSyncPath
 if (-not $docsDir) {
     $docsDir = Join-Path $env:USERPROFILE "Desktop\Antigravity\Docs"
 }
@@ -225,7 +221,7 @@ if (Test-Path $docsDir) {
 }
 
 # Generate Standalone HTML5 Executive Dashboard
-$reportingEngine = "C:\PostInstall\Tools\ReportingEngine.ps1"
+$reportingEngine = Join-Path (Get-SuiteRoot) "Tools\ReportingEngine.ps1"
 if (Test-Path $reportingEngine) {
     try {
         . $reportingEngine
@@ -236,13 +232,13 @@ if (Test-Path $reportingEngine) {
             OSName         = $osCaption
             CPU            = $cpuName
             CPUCores       = $cores
-            RAMTotal       = "$ramSpeedActual MHz"
-            RAMSpeedActual = "Nominal: $ramSpeedRated MHz"
-            IsXmpActive    = $isHighPerf
+            RAMTotal       = "$ramSpeedActual MT/s"
+            RAMSpeedActual = "Nominal: $ramSpeedRated MT/s"
+            IsXmpActive    = (-not $memInfo.BelowRatedSpeed)
             GPU            = $gpuNames
             GPUVendor      = "Multi-GPU"
         }
-        $htmlTemp = "C:\Windows\Temp\PostInstall_Report.html"
+        $htmlTemp = Join-Path $summaryDir "PostInstall_Report.html"
         New-PostInstallHtmlReport -Specs $htmlSpecs -Checks $checks -Volumes $volumes -OutputFile $htmlTemp | Out-Null
         Write-Output "[SUCCESS] HTML5 Yonetici Paneli olusturuldu: $htmlTemp"
 

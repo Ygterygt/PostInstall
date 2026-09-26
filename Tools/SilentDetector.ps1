@@ -177,7 +177,7 @@ function Get-InstallerSignature {
 
 function Get-CustomInstallersList {
     param(
-        [string]$Directory = "C:\PostInstall\Installers"
+        [string]$Directory = (Join-Path (Split-Path -Parent $PSScriptRoot) "Installers")
     )
 
     if (-not (Test-Path $Directory)) {

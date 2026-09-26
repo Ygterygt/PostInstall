@@ -15,10 +15,12 @@ $ErrorActionPreference = "Continue"
 
 Write-Output "[INFO] 00_SystemSnapshotAndBackup: Guvenlik yedegi ve Sistem Geri Yukleme Noktasi olusturuluyor..."
 
-$snapshotEnginePath = "C:\PostInstall\Tools\SnapshotEngine.ps1"
+. (Join-Path (Split-Path -Parent $PSScriptRoot) "Tools\Common.ps1")
+$snapshotEnginePath = Join-Path (Get-SuiteRoot) "Tools\SnapshotEngine.ps1"
+$backupDir = Get-SuiteDataDir "Backups"
 if (Test-Path $snapshotEnginePath) {
     . $snapshotEnginePath
-    $res = New-SystemSnapshot -Description "Antigravity PostInstall Pre-Execution Snapshot" -BackupDir "C:\PostInstall\Backups"
+    $res = New-SystemSnapshot -Description "Antigravity PostInstall Pre-Execution Snapshot" -BackupDir $backupDir
     
     if ($res.RestorePointCreated) {
         Write-Output "[SUCCESS] VSS Sistem Geri Yukleme Noktasi basariyla alindi."
@@ -27,7 +29,7 @@ if (Test-Path $snapshotEnginePath) {
     }
 
     if ($res.RegistryBackupCreated) {
-        Write-Output "[SUCCESS] Ortam ve Registry yedek dosyalari: $($res.BackupFiles.Count) adet dosya kaydedildi."
+        Write-Output "[SUCCESS] Ortam ve Registry yedek dosyalari: $($res.BackupFiles.Count) adet dosya kaydedildi ($backupDir)."
     }
 } else {
     Write-Output "[WARN] SnapshotEngine.ps1 bulunamadi. Dogrudan Checkpoint-Computer deneniyor..."

@@ -33,40 +33,72 @@ function Write-MaintenanceLog {
 function Clear-SystemJunkAndTemp {
     <#
     .SYNOPSIS
-        Safely clears user temp, system temp, crash dumps, WER error logs, and Recycle Bin.
+        Safely clears user temp, system temp, crash dumps and WER queues.
+    .PARAMETER MinAgeDays
+        Only files older than this are removed (0 = everything). Protects files of running installers.
+    .PARAMETER ExcludePattern
+        File/folder name wildcards that are never deleted (suite logs, state, reports).
+    .PARAMETER Paths
+        Override target folders (used by tests); defaults to the standard junk locations.
     #>
     [CmdletBinding()]
     param(
-        [switch]$IncludeRecycleBin
+        [switch]$IncludeRecycleBin,
+        [int]$MinAgeDays = 1,
+        [string[]]$ExcludePattern = @("PostInstall*", "ComputerMaintenancePro*", "CMP_*"),
+        [string[]]$Paths = @()
     )
-    
-    Write-MaintenanceLog "Gecici dosya ve sistem artiklari temizligi baslatiliyor..." "INFO"
-    $bytesCleaned = 0
-    
-    $targetPaths = @(
-        $env:TEMP,
-        "$env:LOCALAPPDATA\Temp",
-        "$env:windir\Temp",
-        "$env:windir\Minidump",
-        "$env:ProgramData\Microsoft\Windows\WER\ReportQueue",
-        "$env:ProgramData\Microsoft\Windows\WER\ReportArchive",
-        "$env:windir\SoftwareDistribution\DeliveryOptimization"
-    ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+    Write-MaintenanceLog "Gecici dosya ve sistem artiklari temizligi baslatiliyor (Esik: $MinAgeDays gun)..." "INFO"
+    $bytesCleaned = [long]0
+    $filesRemoved = 0
+    $cutoff = (Get-Date).AddDays(-$MinAgeDays)
+
+    if ($Paths.Count -eq 0) {
+        $Paths = @(
+            $env:TEMP,
+            "$env:LOCALAPPDATA\Temp",
+            "$env:windir\Temp",
+            "$env:windir\Minidump",
+            "$env:ProgramData\Microsoft\Windows\WER\ReportQueue",
+            "$env:ProgramData\Microsoft\Windows\WER\ReportArchive",
+            "$env:windir\SoftwareDistribution\DeliveryOptimization"
+        )
+    }
+    $targetPaths = $Paths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+    $isExcluded = {
+        param($item, $root)
+        # Check every path segment below the root so excluded folders protect their content
+        $relative = $item.FullName.Substring($root.Length).TrimStart('\')
+        foreach ($segment in ($relative -split '\\')) {
+            foreach ($pattern in $ExcludePattern) {
+                if ($segment -like $pattern) { return $true }
+            }
+        }
+        return $false
+    }
 
     foreach ($path in $targetPaths) {
+        $root = (Resolve-Path -LiteralPath $path).Path.TrimEnd('\')
         try {
-            $files = Get-ChildItem -Path $path -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer }
+            $files = Get-ChildItem -LiteralPath $root -Recurse -Force -File -ErrorAction SilentlyContinue |
+                     Where-Object { $_.LastWriteTime -lt $cutoff }
             foreach ($file in $files) {
+                if (& $isExcluded $file $root) { continue }
+                $size = $file.Length
                 try {
-                    $bytesCleaned += $file.Length
-                    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
-                } catch {}
+                    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                    $bytesCleaned += $size
+                    $filesRemoved++
+                } catch {}  # In use / access denied: normal for temp folders
             }
-            # Clean empty directories
-            Get-ChildItem -Path $path -Recurse -Directory -Force -ErrorAction SilentlyContinue | 
-                Sort-Object FullName -Descending | 
+            # Clean empty directories (deepest first)
+            Get-ChildItem -LiteralPath $root -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+                Sort-Object { $_.FullName.Length } -Descending |
                 ForEach-Object {
-                    if ((Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+                    if (-not (& $isExcluded $_ $root) -and
+                        @(Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue).Count -eq 0) {
                         Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
                     }
                 }
@@ -83,11 +115,12 @@ function Clear-SystemJunkAndTemp {
     }
 
     $mbReclaimed = [Math]::Round($bytesCleaned / 1MB, 2)
-    Write-MaintenanceLog "Sistem artiklari temizligi tamamlandi. Geri kazanilan alan: $mbReclaimed MB" "SUCCESS"
+    Write-MaintenanceLog "Sistem artiklari temizligi tamamlandi. $filesRemoved dosya, $mbReclaimed MB geri kazanildi." "SUCCESS"
     return @{
-        Success     = $true
-        BytesFreed  = $bytesCleaned
-        MBFreed     = $mbReclaimed
+        Success      = $true
+        BytesFreed   = $bytesCleaned
+        MBFreed      = $mbReclaimed
+        FilesRemoved = $filesRemoved
     }
 }
 
@@ -240,28 +273,37 @@ function Optimize-StorageDrives {
 function Prune-WindowsEventLogs {
     <#
     .SYNOPSIS
-        Clears high-churn event logs if exceeding 20MB.
+        Archives (.evtx) and clears high-churn event logs exceeding the size threshold.
+        Logs are never cleared without a backup, so troubleshooting history is preserved.
     #>
     [CmdletBinding()]
     param(
-        [int]$MaxSizeBytes = 20971520 # 20MB
+        [long]$MaxSizeBytes = 20971520, # 20MB
+        [string]$ArchiveDir = (Join-Path $env:ProgramData "ComputerMaintenancePro\EventLogArchive")
     )
 
     Write-MaintenanceLog "Windows Olay Gunlukleri (Event Log) bakimi yapiliyor..." "INFO"
     $logsToPrune = @("Application", "System", "Setup")
     $clearedCount = 0
+    if (-not (Test-Path $ArchiveDir)) { New-Item -Path $ArchiveDir -ItemType Directory -Force | Out-Null }
+    $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
     foreach ($logName in $logsToPrune) {
         try {
             $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
             if ($log -and $log.FileSize -gt $MaxSizeBytes) {
-                wevtutil.exe cl $logName
-                Write-MaintenanceLog "Olay Gunlugu temizlendi: $logName ($([Math]::Round($log.FileSize / 1MB, 1)) MB)" "SUCCESS"
-                $clearedCount++
+                $backup = Join-Path $ArchiveDir "$($logName)_$stamp.evtx"
+                wevtutil.exe cl $logName "/bu:$backup"
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $backup)) {
+                    Write-MaintenanceLog "Olay Gunlugu arsivlendi ve temizlendi: $logName ($([Math]::Round($log.FileSize / 1MB, 1)) MB) -> $backup" "SUCCESS"
+                    $clearedCount++
+                } else {
+                    Write-MaintenanceLog "Olay Gunlugu arsivlenemedi, temizlenmedi: $logName" "WARN"
+                }
             }
         } catch {}
     }
-    return @{ ClearedCount = $clearedCount }
+    return @{ ClearedCount = $clearedCount; ArchiveDir = $ArchiveDir }
 }
 
 function Get-BatteryHealthReport {

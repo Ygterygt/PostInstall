@@ -13,7 +13,7 @@ function New-PostInstallHtmlReport {
         [Parameter(Mandatory)][object]$Specs,
         [Parameter(Mandatory)][array]$Checks,
         [Parameter(Mandatory)][array]$Volumes,
-        [string]$OutputFile = "C:\Windows\Temp\PostInstall_Report.html"
+        [string]$OutputFile = (Join-Path $env:ProgramData "ComputerMaintenancePro\Reports\PostInstall_Report.html")
     )
 
     $outDir = Split-Path $OutputFile

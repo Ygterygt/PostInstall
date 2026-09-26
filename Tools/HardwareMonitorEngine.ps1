@@ -64,11 +64,18 @@ function Get-LiveTelemetrySample {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
     # 1. CPU Load & Clock
+    # Counters are rate based: they must live across samples (first NextValue() is always 0).
+    # "% Processor Utility" matches Task Manager; "% Processor Performance" gives the live clock ratio.
     $cpuLoad = 0
     try {
         if (-not $Script:CpuPerfCounter) {
-            $Script:CpuPerfCounter = New-Object System.Diagnostics.PerformanceCounter("Processor", "% Processor Time", "_Total")
+            try {
+                $Script:CpuPerfCounter = New-Object System.Diagnostics.PerformanceCounter("Processor Information", "% Processor Utility", "_Total")
+            } catch {
+                $Script:CpuPerfCounter = New-Object System.Diagnostics.PerformanceCounter("Processor", "% Processor Time", "_Total")
+            }
             [void]$Script:CpuPerfCounter.NextValue()
+            Start-Sleep -Milliseconds 250
         }
         $cpuLoad = [Math]::Min(100, [Math]::Max(0, [int]$Script:CpuPerfCounter.NextValue()))
     } catch {
@@ -81,6 +88,16 @@ function Get-LiveTelemetrySample {
     }
 
     $clockGhz = $cache.CpuMaxClockGHz
+    try {
+        if ($null -eq $Script:CpuFreqCounter) {
+            $Script:CpuFreqCounter = New-Object System.Diagnostics.PerformanceCounter("Processor Information", "% Processor Performance", "_Total")
+            [void]$Script:CpuFreqCounter.NextValue()
+        }
+        $perfPct = [double]$Script:CpuFreqCounter.NextValue()
+        if ($perfPct -gt 0) { $clockGhz = [Math]::Round($cache.CpuMaxClockGHz * $perfPct / 100.0, 2) }
+    } catch {
+        $Script:CpuFreqCounter = $false   # counter unavailable: keep nominal clock, don't retry every sample
+    }
 
     # CPU Temperature
     $cpuTempC = $null

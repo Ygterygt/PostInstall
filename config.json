@@ -1,22 +1,30 @@
 ﻿{
   "ApplicationName": "Computer Maintenance Pro - Enterprise System Care & Staging Suite",
   "TargetHost": "*",
-  "Version": "4.0.0",
-  "LogFile": "C:\\Windows\\Temp\\PostInstall.log",
-  "ErrorLogFile": "C:\\Windows\\Temp\\PostInstall_Error.log",
-  "StateFile": "C:\\Windows\\Temp\\PostInstall_State.json",
-  "SummaryReport": "C:\\Windows\\Temp\\PostInstall_Summary.md",
+  "Version": "4.1.0",
+  "LogFile": "%ProgramData%\\ComputerMaintenancePro\\Logs\\PostInstall.log",
+  "ErrorLogFile": "%ProgramData%\\ComputerMaintenancePro\\Logs\\PostInstall_Error.log",
+  "StateFile": "%ProgramData%\\ComputerMaintenancePro\\State\\PostInstall_State.json",
+  "SummaryReport": "%ProgramData%\\ComputerMaintenancePro\\Reports\\PostInstall_Summary.md",
   "DocsSyncPath": "%USERPROFILE%\\Desktop\\Antigravity\\Docs",
   "AutoReboot": true,
   "RebootCountdownSeconds": 20,
   "RunOnceKeyName": "ComputerMaintenanceProResume",
-  "MaxRetriesPerStep": 2,
+  "MaxRetriesPerStep": 1,
+  "StepTimeoutSeconds": 1800,
   "Theme": "DarkEnterprise",
   "Maintenance": {
-    "TempCleanDaysThreshold": 0,
+    "TempCleanDaysThreshold": 1,
+    "EmptyRecycleBin": false,
+    "PruneEventLogs": true,
     "PruneEventLogMaxSizeBytes": 20971520,
-    "DismResetBase": true,
+    "DismResetBase": false,
     "ReTrimVolumes": true,
     "AutoFlushDns": true
+  },
+  "Network": {
+    "ChangeDns": true,
+    "DnsServers": ["1.1.1.1", "1.0.0.1"],
+    "SkipIfDomainJoined": true
   }
 }

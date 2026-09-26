@@ -11,7 +11,7 @@
 function Export-SystemDrivers {
     [CmdletBinding()]
     param(
-        [string]$Destination = "C:\PostInstall\Backups\Drivers"
+        [string]$Destination = (Join-Path $env:ProgramData "ComputerMaintenancePro\Backups\Drivers")
     )
 
     $result = [PSCustomObject]@{
@@ -59,7 +59,7 @@ function Export-SystemDrivers {
 function Install-SystemDrivers {
     [CmdletBinding()]
     param(
-        [string]$DriverSourceDir = "C:\PostInstall\Drivers"
+        [string]$DriverSourceDir = (Join-Path (Split-Path -Parent $PSScriptRoot) "Drivers")
     )
 
     $result = [PSCustomObject]@{

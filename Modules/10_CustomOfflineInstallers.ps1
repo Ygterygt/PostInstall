@@ -3,21 +3,43 @@
 .SYNOPSIS
     10_CustomOfflineInstallers.ps1 - Automated execution of custom offline installers
 .DESCRIPTION
-    Scans C:\PostInstall\Installers for any user-provided .exe, .msi, .msix, .appx files.
+    Scans <suite root>\Installers for any user-provided .exe, .msi, .msix, .appx files.
     Utilizes SilentDetector.ps1 to automatically inspect and identify silent command line
     arguments, executing each installer silently with timeout and exit code monitoring.
 #>
 [CmdletBinding()]
 param(
-    [string]$InstallersDirectory = "C:\PostInstall\Installers",
+    [string]$InstallersDirectory = "",
     [string[]]$SelectedFileNames = @()
 )
 
 $ErrorActionPreference = "Continue"
+# PS 5.1 leaves $PSScriptRoot empty inside script param() defaults, so resolve here
+if (-not $InstallersDirectory) { $InstallersDirectory = Join-Path (Split-Path -Parent $PSScriptRoot) "Installers" }
 
 Write-Output "[INFO] 10_CustomOfflineInstallers: Ozel ve cevrimdisi yukleyiciler taranıyor..."
 
-$detectorScript = "C:\PostInstall\Tools\SilentDetector.ps1"
+. (Join-Path (Split-Path -Parent $PSScriptRoot) "Tools\Common.ps1")
+$detectorScript = Join-Path (Get-SuiteRoot) "Tools\SilentDetector.ps1"
+
+# Selection made in the UI wizard (page 3). Missing file = install everything.
+if ($SelectedFileNames.Count -eq 0) {
+    $selectionFile = Join-Path (Split-Path -Parent (Get-SuiteConfig).StateFile) "OfflineSelection.json"
+    if (Test-Path $selectionFile) {
+        try {
+            $sel = Get-Content -LiteralPath $selectionFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            $SelectedFileNames = @($sel.Files)
+            Write-Output "[INFO] Sihirbaz secimi uygulaniyor: $($SelectedFileNames.Count) yukleyici secili."
+            if ($SelectedFileNames.Count -eq 0) {
+                Write-Output "[SUCCESS] Hicbir cevrimdisi yukleyici secilmedi. Adim atlandi."
+                exit 0
+            }
+        } catch {
+            Write-Output "[WARN] Secim dosyasi okunamadi ($selectionFile): $_. Tum yukleyiciler kurulacak."
+        }
+    }
+}
+$rebootRequired = $false
 if (-not (Test-Path $detectorScript)) {
     Write-Output "[WARN] SilentDetector.ps1 bulunamadi ($detectorScript). Varsayilan parametreler kullanilacak."
 } else {
@@ -94,8 +116,9 @@ foreach ($item in $installers) {
             0 {
                 Write-Output "[SUCCESS] $($item.FileName) basariyla kuruldu (Exit: 0)."
             }
-            3010 {
-                Write-Output "[SUCCESS] $($item.FileName) kuruldu. Yeniden baslatma gerekiyor (Exit: 3010)."
+            { $_ -in @(3010, 1641) } {
+                Write-Output "[SUCCESS] $($item.FileName) kuruldu. Yeniden baslatma gerekiyor (Exit: $exitCode)."
+                $rebootRequired = $true
             }
             1638 {
                 Write-Output "[SUCCESS] $($item.FileName) zaten kurulu (Exit: 1638)."
@@ -109,5 +132,9 @@ foreach ($item in $installers) {
     }
 }
 
+if ($rebootRequired) {
+    Write-Output "[WARN] 10_CustomOfflineInstallers tamamlandi - yeniden baslatma gerekiyor."
+    exit 3010
+}
 Write-Output "[SUCCESS] 10_CustomOfflineInstallers tamamlandi."
 exit 0

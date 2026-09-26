@@ -23,7 +23,7 @@ $ErrorActionPreference = "Continue"
 
 Write-Output "[INFO] 09_SystemUpdates: Donanim uyumluluk matrisi ve GPU yoneticisi baslatiliyor..."
 
-$engineRoot = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { "C:\PostInstall" }
+$engineRoot = Split-Path -Parent $PSScriptRoot
 $gpuDbPath = Join-Path $engineRoot "gpu_compatibility.json"
 $packageEngine = Join-Path $engineRoot "Tools\PackageEngine.ps1"
 

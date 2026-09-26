@@ -78,12 +78,17 @@ function Get-FileWithRetry {
                 continue
             }
 
-            try {
-                $sig = Get-AuthenticodeSignature -FilePath $Destination -ErrorAction SilentlyContinue
-                if ($sig -and $sig.Status -eq "Valid") {
-                    Write-Output "[SUCCESS] Dijital Imza Gecerli (Authenticode): $($sig.SignerCertificate.Subject)"
-                }
-            } catch {}
+            # Never execute a downloaded runtime without a valid Microsoft Authenticode signature
+            $sig = $null
+            try { $sig = Get-AuthenticodeSignature -FilePath $Destination -ErrorAction Stop } catch {}
+            if ($sig -and $sig.Status -eq "Valid" -and $sig.SignerCertificate.Subject -like "*Microsoft*") {
+                Write-Output "[SUCCESS] Dijital Imza Gecerli (Authenticode): $($sig.SignerCertificate.Subject)"
+            } else {
+                $sigStatus = if ($sig) { $sig.Status } else { "Okunamadi" }
+                Write-Output "[ERROR] $Description dijital imzasi dogrulanamadi ($sigStatus). Dosya silindi, calistirilmayacak."
+                Remove-Item $Destination -Force -ErrorAction SilentlyContinue
+                return $false
+            }
 
             $sizeMB = [math]::Round($fileLen / 1MB, 1)
             Write-Output "[SUCCESS] $Description basariyla dogrulandi ve hazirlandi ($sizeMB MB)."
