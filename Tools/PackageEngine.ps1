@@ -112,6 +112,25 @@ function Test-WingetPackageInstalled {
     return $null
 }
 
+function Get-AppxPackageFromRegistry {
+    <#
+    .SYNOPSIS
+        Finds a current-user AppX/MSIX package by reading the AppModel repository in the registry.
+    .NOTES
+        Deliberately avoids Get-AppxPackage: the Appx cmdlets block on WinRT async calls and can hang
+        an STA WinForms thread before its message loop runs (suspected cause of an elevated UI that
+        never showed its window). Key names are package full names: Name_Version_Arch_Resource_Publisher.
+    #>
+    param([Parameter(Mandatory)][string]$NamePattern)
+    $repo = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages"
+    $key = Get-ChildItem -Path $repo -ErrorAction SilentlyContinue |
+           Where-Object { ($_.PSChildName -split "_")[0] -like "*$NamePattern*" } |
+           Select-Object -First 1
+    if (-not $key) { return $null }
+    $parts = $key.PSChildName -split "_"
+    return [PSCustomObject]@{ Name = $parts[0]; Version = $parts[1]; FullName = $key.PSChildName }
+}
+
 function Get-InstalledAppInfo {
     [CmdletBinding()]
     param(
@@ -163,7 +182,7 @@ function Get-InstalledAppInfo {
 
     # 3. Check AppX / Modern Package
     if ($AppXPackageName) {
-        $appx = Get-AppxPackage -Name "*$AppXPackageName*" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $appx = Get-AppxPackageFromRegistry -NamePattern $AppXPackageName
         if ($appx) {
             return @{
                 IsInstalled      = $true

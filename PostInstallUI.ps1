@@ -25,14 +25,95 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 #endregion
 
-#region --- Single Instance Guard ---
-# RunOnce resume + a manual start (or a double click) must never drive the engine twice
-$Script:InstanceMutexCreated = $false
-$Script:InstanceMutex = New-Object System.Threading.Mutex($true, "Global\ComputerMaintenancePro_UI", [ref]$Script:InstanceMutexCreated)
-if (-not $Script:InstanceMutexCreated) {
-    [System.Windows.Forms.MessageBox]::Show("Computer Maintenance Pro zaten çalışıyor.", "Zaten Açık", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
-    exit 0
+#region --- Startup Trace ---
+# Each launch records its startup milestones, so a UI that never shows its window can be diagnosed
+$Script:UiTraceFile = Join-Path $env:ProgramData "ComputerMaintenancePro\Logs\UI_Startup.log"
+function Write-UiTrace {
+    param([string]$Step)
+    try {
+        $dir = Split-Path -Parent $Script:UiTraceFile
+        if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
+        $line = "[{0}] [PID {1}] {2}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"), $PID, $Step
+        [System.IO.File]::AppendAllText($Script:UiTraceFile, "$line`r`n", (New-Object System.Text.UTF8Encoding($false)))
+    } catch {}
 }
+Write-UiTrace "Baslatiliyor (Resume=$Resume, Auto=$Auto, Elevated=$(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)))"
+#endregion
+
+#region --- Single Instance Guard ---
+# RunOnce resume + a manual start (or a double click) must never drive the engine twice.
+# The owner writes its PID next to the logs so a second launch can focus it - or, if that copy
+# is stuck without a window, offer to end it instead of just refusing to start.
+if (-not ("CmpNative.Window" -as [type])) {
+    Add-Type -Namespace CmpNative -Name Window -MemberDefinition @"
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr hWnd);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
+"@
+}
+$Script:InstancePidFile = Join-Path $env:ProgramData "ComputerMaintenancePro\State\UI.pid"
+$Script:InstanceMutexCreated = $false
+$Script:InstanceMutex = New-Object System.Threading.Mutex($false, "Global\ComputerMaintenancePro_UI")
+
+function Enter-InstanceMutex {
+    param([int]$TimeoutMs = 0)
+    try { return $Script:InstanceMutex.WaitOne($TimeoutMs) }
+    catch [System.Threading.AbandonedMutexException] { return $true }   # previous owner died: now ours
+}
+
+if (-not (Enter-InstanceMutex)) {
+    # Candidates: the PID recorded by the owner, plus any other UI host found by command line
+    # (older builds wrote no PID file; command lines of elevated processes are only visible when elevated)
+    $others = @()
+    try {
+        $otherPid = [int](Get-Content -LiteralPath $Script:InstancePidFile -ErrorAction Stop | Select-Object -First 1)
+        $others += Get-Process -Id $otherPid -ErrorAction Stop
+    } catch {}
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'PostInstallUI\.ps1' } |
+        ForEach-Object { $others += Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
+    $others = @($others | Where-Object { $_ } | Sort-Object Id -Unique)
+
+    $withWindow = $others | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1
+    if ($withWindow) {
+        # Normal case: bring the running window to the front and quit quietly
+        [void][CmpNative.Window]::ShowWindow($withWindow.MainWindowHandle, 9)   # SW_RESTORE
+        [void][CmpNative.Window]::SetForegroundWindow($withWindow.MainWindowHandle)
+        Write-UiTrace "Zaten acik (PID $($withWindow.Id)); mevcut pencere one getirildi."
+        exit 0
+    }
+
+    $who = if ($others.Count -gt 0) { ($others | ForEach-Object { "PID $($_.Id) ($($_.StartTime.ToString('HH:mm:ss')))" }) -join ", " } else { "PID görünmüyor" }
+    if ($others.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("Computer Maintenance Pro'nun arka planda takılı bir kopyası var, ancak bu yetkiyle görülemiyor.`r`n`r`nUygulamayı PostInstall.exe ile (yönetici olarak) açın ya da Görev Yöneticisi > Ayrıntılar'dan penceresi olmayan 'powershell.exe' süreçlerini sonlandırın.", "Takılı Kopya", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+        Write-UiTrace "Kilit baskasinda, aday surec gorunmuyor; cikiliyor."
+        exit 0
+    }
+    $answer = [System.Windows.Forms.MessageBox]::Show(
+        "Computer Maintenance Pro'nun penceresi olmayan, yanıt vermeyen kopyası/kopyaları arka planda çalışıyor:`r`n$who`r`n`r`nBunlar sonlandırılıp uygulama açılsın mı?",
+        "Takılı Kopya Bulundu", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+    if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
+        Write-UiTrace "Takili kopya ($who) icin sonlandirma reddedildi; cikiliyor."
+        exit 0
+    }
+    $failed = @()
+    foreach ($o in $others) {
+        try { Stop-Process -Id $o.Id -Force -ErrorAction Stop } catch { $failed += $o.Id }
+    }
+    Write-UiTrace "Takili kopyalar sonlandirildi: $who (basarisiz: $($failed -join ','))"
+    if (-not (Enter-InstanceMutex -TimeoutMs 5000)) {
+        $hint = if ($failed.Count -gt 0) { "Sonlandırılamayan PID: $($failed -join ', '). Uygulamayı yönetici olarak (PostInstall.exe) açmayı deneyin." } else { "Lütfen tekrar deneyin." }
+        [System.Windows.Forms.MessageBox]::Show("Önceki kopya kapatılamadı. $hint", "Hata", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        Write-UiTrace "Kilit 5 sn icinde serbest kalmadi; cikiliyor."
+        exit 1
+    }
+}
+$Script:InstanceMutexCreated = $true
+try {
+    $pidDir = Split-Path -Parent $Script:InstancePidFile
+    if (-not (Test-Path $pidDir)) { New-Item -Path $pidDir -ItemType Directory -Force | Out-Null }
+    Set-Content -LiteralPath $Script:InstancePidFile -Value $PID -Encoding ASCII
+} catch {}
+Write-UiTrace "Tek ornek kilidi alindi."
 #endregion
 
 #region --- Bootstrap Engine & Tools ---
@@ -78,6 +159,8 @@ if (Test-Path $Script:GpuDbPath) {
     }
 }
 #endregion
+
+Write-UiTrace "Motor ve araclar yuklendi."
 
 #region --- Theme (Enterprise Dark) ---
 $Theme = @{
@@ -1067,7 +1150,13 @@ function Switch-AppTab {
         "Monitoring"  { $pnlTabMon.BringToFront() }
         "Maintenance" { $pnlTabMaint.BringToFront() }
         "Wizard"      { $pnlTabWizard.BringToFront() }
-        "GpuCenter"   { $pnlTabGpu.BringToFront() }
+        "GpuCenter"   {
+            $pnlTabGpu.BringToFront()
+            if (-not $Script:GpuCardsLoaded) {
+                $Script:GpuCardsLoaded = $true
+                try { Update-GpuCenterCard } catch { Write-GpuLog "[ERROR] GPU kartları yüklenemedi: $($_.Exception.Message)" }
+            }
+        }
         "Console"     { $pnlTabConsole.BringToFront() }
     }
 
@@ -1343,7 +1432,8 @@ function Update-GpuCenterCard {
         $flpGpuCards.Controls.Add($card)
     }
 }
-Update-GpuCenterCard
+# Built on first visit of the GPU tab: keeps registry/AppX lookups out of the startup path
+$Script:GpuCardsLoaded = $false
 #endregion
 
 #region --- Maintenance Action Button Handlers (Tab 2) ---
@@ -1891,12 +1981,14 @@ $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
 $form.ShowInTaskbar = $true
 $form.TopMost = $true
 $form.Add_Shown({
+    Write-UiTrace "Pencere gosterildi."
     $form.Activate()
     $form.BringToFront()
     $form.Focus()
     $form.TopMost = $false
 })
 
+Write-UiTrace "Form hazir, mesaj dongusu baslatiliyor."
 $uiTimer.Start()
 Start-TelemetrySampler
 $telemetryTimer.Start()
