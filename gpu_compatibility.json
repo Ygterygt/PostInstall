@@ -1,8 +1,8 @@
 ﻿{
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "Version": "1.1.0",
+  "Version": "1.2.0",
   "LastUpdated": "2026-09-27",
-  "Notes": "Package ids verified with 'winget show --exact' on 2026-09-27. Pinned-version direct download URLs were removed: they rot (404/403) and vendors now ship companion apps via winget/Microsoft Store. ManualDownloadPage is shown to the user when every automated source fails.",
+  "Notes": "Package ids verified with 'winget show --exact' on 2026-09-27. Pinned-version direct download URLs were removed: they rot (404/403) and vendors now ship companion apps via winget/Microsoft Store. ManualDownloadPage is shown to the user when every automated source fails. AMD: Store 'AMD Radeon Software' removed (stale, PA-300 mismatch with current drivers) - Adrenalin ships with the driver package only.",
   "Vendors": {
     "NVIDIA": {
       "VendorId": "10DE",
@@ -22,7 +22,8 @@
           "RegistryDisplayName": "NVIDIA App",
           "DirectDownloadUrl": "",
           "ManualDownloadPage": "https://www.nvidia.com/en-us/software/nvidia-app/",
-          "Type": "Gaming"
+          "Type": "Gaming",
+          "Note": ""
         },
         {
           "Id": "NVIDIA_LEGACY_GEFORCE",
@@ -37,7 +38,8 @@
           "RegistryDisplayName": "NVIDIA Control Panel",
           "DirectDownloadUrl": "",
           "ManualDownloadPage": "https://www.nvidia.com/en-us/drivers/",
-          "Type": "Legacy"
+          "Type": "Legacy",
+          "Note": ""
         },
         {
           "Id": "NVIDIA_PROFESSIONAL",
@@ -52,29 +54,31 @@
           "RegistryDisplayName": "NVIDIA App",
           "DirectDownloadUrl": "",
           "ManualDownloadPage": "https://www.nvidia.com/en-us/design-visualization/software/rtx-desktop-manager/",
-          "Type": "Workstation"
+          "Type": "Workstation",
+          "Note": ""
         }
       ]
     },
     "AMD": {
       "VendorId": "1002",
       "VendorName": "Advanced Micro Devices, Inc.",
-      "ControlPanelPackage": "9NZ1BJQN6BHL",
+      "ControlPanelPackage": "",
       "Profiles": [
         {
           "Id": "AMD_MODERN_RADEON",
           "Name": "AMD Radeon RX & RDNA iGPU (Adrenalin)",
           "Pattern": "(RX [4-9][0-9]{2,3}|Radeon [6789][0-9]{2}M|Radeon(\\(TM\\))? Graphics|Radeon Vega|RDNA)",
-          "RecommendedApp": "AMD Radeon Software",
-          "WinGetId": "9NZ1BJQN6BHL",
-          "WinGetSource": "msstore",
+          "RecommendedApp": "AMD Software: Adrenalin Edition",
+          "WinGetId": "",
+          "WinGetSource": "",
           "AltWinGetId": "",
           "AltWinGetSource": "",
-          "AppxName": "AMDRadeonSoftware",
+          "AppxName": "",
           "RegistryDisplayName": "AMD Software",
           "DirectDownloadUrl": "",
           "ManualDownloadPage": "https://www.amd.com/en/support/download/drivers.html",
-          "Type": "Gaming"
+          "Type": "Gaming",
+          "Note": "Adrenalin arayüzü sürücü paketiyle aynı sürümde gelir. Microsoft Store'daki 'AMD Radeon Software' (9NZ1BJQN6BHL) yıllardır güncellenmiyor ve güncel sürücülerle PA-300 uyumsuzluk hatası verir; kullanmayın. Dizüstü bilgisayarlarda önce üreticinin (OEM) sürücüsü önerilir."
         },
         {
           "Id": "AMD_PRO_WORKSTATION",
@@ -89,7 +93,8 @@
           "RegistryDisplayName": "AMD Software: PRO Edition",
           "DirectDownloadUrl": "",
           "ManualDownloadPage": "https://www.amd.com/en/support/download/professional-graphics.html",
-          "Type": "Workstation"
+          "Type": "Workstation",
+          "Note": ""
         }
       ]
     },
@@ -111,7 +116,8 @@
           "RegistryDisplayName": "Driver & Support Assistant",
           "DirectDownloadUrl": "",
           "ManualDownloadPage": "https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html",
-          "Type": "Gaming"
+          "Type": "Gaming",
+          "Note": ""
         },
         {
           "Id": "INTEL_IRIS_UHD",
@@ -126,7 +132,8 @@
           "RegistryDisplayName": "Driver & Support Assistant",
           "DirectDownloadUrl": "",
           "ManualDownloadPage": "https://www.intel.com/content/www/us/en/support/detect.html",
-          "Type": "General"
+          "Type": "General",
+          "Note": ""
         }
       ]
     },
@@ -147,7 +154,8 @@
           "RegistryDisplayName": "Guest Additions|VMware Tools",
           "DirectDownloadUrl": "",
           "ManualDownloadPage": "",
-          "Type": "Virtual"
+          "Type": "Virtual",
+          "Note": ""
         }
       ]
     }

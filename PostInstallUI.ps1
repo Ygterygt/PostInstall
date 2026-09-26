@@ -1345,15 +1345,18 @@ function Update-GpuCenterCard {
         $lblDetails.Text        = "Üretici         : $vendorKey`r`n" +
                                   "Sürücü Sürümü   : $driverVer`r`n" +
                                   "Önerilen Yazılım: $recApp`r`n" +
-                                  "Yazılım Durumu  : $softwareStatus"
+                                  "Yazılım Durumu  : $softwareStatus" +
+                                  $(if ($matchedProfile -and $matchedProfile.Note) { "`r`n`r`nNot: $($matchedProfile.Note)" } else { "" })
         $lblDetails.UseMnemonic = $false
+        if ($matchedProfile -and $matchedProfile.Note) { $card.Height = 320 }
 
         $btnRow = New-Object System.Windows.Forms.Panel
         $btnRow.Dock      = [System.Windows.Forms.DockStyle]::Bottom
         $btnRow.Height    = 36
 
         $btnInstallGpu = New-Object System.Windows.Forms.Button
-        $btnInstallGpu.Text      = if ($isInstalled) { "Yeniden Kur / Güncelle" } else { "Yazılımı Kur" }
+        $hasAutoSource = [bool]($matchedProfile -and ($matchedProfile.WinGetId -or $matchedProfile.AltWinGetId))
+        $btnInstallGpu.Text      = if (-not $hasAutoSource) { "Üretici Sayfasını Aç" } elseif ($isInstalled) { "Yeniden Kur / Güncelle" } else { "Yazılımı Kur" }
         $btnInstallGpu.Font      = $Theme.FontButton
         $btnInstallGpu.Dock      = [System.Windows.Forms.DockStyle]::Left
         $btnInstallGpu.Width     = 180
@@ -1388,6 +1391,15 @@ function Update-GpuCenterCard {
             $info = $this.Tag
             if (-not $info.Profile) {
                 Write-GpuLog "Bu GPU için tanımlı destek yazılımı yok."
+                return
+            }
+            if (-not ($info.Profile.WinGetId -or $info.Profile.AltWinGetId)) {
+                # No safe automated source (e.g. AMD: control panel ships only with the driver package)
+                if ($info.Profile.Note) { Write-GpuLog "[WARN] $($info.Profile.Note)" }
+                if ($info.Profile.ManualDownloadPage) {
+                    Write-GpuLog "Üretici indirme sayfası açılıyor: $($info.Profile.ManualDownloadPage)"
+                    Start-Process $info.Profile.ManualDownloadPage
+                }
                 return
             }
             $this.Enabled = $false
