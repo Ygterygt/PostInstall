@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Computer Maintenance Pro - Enterprise GUI Suite v4.0.0
@@ -1029,11 +1029,12 @@ function Update-GpuCenterCard {
             Switch-AppTab -TabName "Maintenance"
             $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] GPU Destek Yazılımı Kurulumu: $capturedApp...`r`n")
             Start-ThreadJob -ScriptBlock {
-                if ($using:capturedProf -and $using:capturedProf.WinGetId) {
-                    & winget.exe install --id $using:capturedProf.WinGetId --silent --accept-package-agreements --accept-source-agreements
-                    $using:maintQueue.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] $using:capturedApp kurulum süreci tamamlandı.")
+                param($p, $app, $q)
+                if ($p -and $p.WinGetId) {
+                    & winget.exe install --id $p.WinGetId --silent --accept-package-agreements --accept-source-agreements
+                    $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] $app kurulum süreci tamamlandı.")
                 }
-            } | Out-Null
+            } -ArgumentList $capturedProf, $capturedApp, $maintQueue | Out-Null
         })
 
         $btnExportDrv.Add_Click({
