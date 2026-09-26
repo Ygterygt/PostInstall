@@ -726,14 +726,45 @@ $pnlPage3.Dock      = [System.Windows.Forms.DockStyle]::Fill
 $pnlPage3.BackColor = $Theme.BgMain
 $pnlWizardPages.Controls.Add($pnlPage3)
 
+$pnlP3TopBar = New-Object System.Windows.Forms.Panel
+$pnlP3TopBar.Dock      = [System.Windows.Forms.DockStyle]::Top
+$pnlP3TopBar.Height    = 38
+$pnlP3TopBar.BackColor = $Theme.BgMain
+$pnlPage3.Controls.Add($pnlP3TopBar)
+
 $lblP3Title = New-Object System.Windows.Forms.Label
-$lblP3Title.Text        = "Çevrimdışı ve Özel Yükleyiciler (C:\PostInstall\Installers)"
+$lblP3Title.Text        = "📦 Çevrimdışı ve Özel Yükleyiciler (C:\PostInstall\Installers)"
 $lblP3Title.Font        = $Theme.FontHeader
 $lblP3Title.ForeColor   = $Theme.AccentCyan
-$lblP3Title.Dock        = [System.Windows.Forms.DockStyle]::Top
-$lblP3Title.Height      = 32
+$lblP3Title.Dock        = [System.Windows.Forms.DockStyle]::Left
+$lblP3Title.Width       = 480
+$lblP3Title.TextAlign   = [System.Drawing.ContentAlignment]::MiddleLeft
 $lblP3Title.UseMnemonic = $false
-$pnlPage3.Controls.Add($lblP3Title)
+$pnlP3TopBar.Controls.Add($lblP3Title)
+
+$btnRefreshInstallers = New-Object System.Windows.Forms.Button
+$btnRefreshInstallers.Text      = "🔄 Listeyi Yenile"
+$btnRefreshInstallers.Font      = $Theme.FontButton
+$btnRefreshInstallers.Dock      = [System.Windows.Forms.DockStyle]::Right
+$btnRefreshInstallers.Width     = 120
+$btnRefreshInstallers.BackColor = $Theme.BgInput
+$btnRefreshInstallers.ForeColor = $Theme.TextPrimary
+$btnRefreshInstallers.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$btnRefreshInstallers.FlatAppearance.BorderColor = $Theme.Border
+$btnRefreshInstallers.Cursor    = [System.Windows.Forms.Cursors]::Hand
+$pnlP3TopBar.Controls.Add($btnRefreshInstallers)
+
+$btnOpenInstallers = New-Object System.Windows.Forms.Button
+$btnOpenInstallers.Text      = "📁 Klasörü Aç"
+$btnOpenInstallers.Font      = $Theme.FontButton
+$btnOpenInstallers.Dock      = [System.Windows.Forms.DockStyle]::Right
+$btnOpenInstallers.Width     = 120
+$btnOpenInstallers.BackColor = $Theme.BgInput
+$btnOpenInstallers.ForeColor = $Theme.AccentCyan
+$btnOpenInstallers.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$btnOpenInstallers.FlatAppearance.BorderColor = $Theme.Border
+$btnOpenInstallers.Cursor    = [System.Windows.Forms.Cursors]::Hand
+$pnlP3TopBar.Controls.Add($btnOpenInstallers)
 
 $lstOffline = New-Object System.Windows.Forms.ListView
 $lstOffline.Dock        = [System.Windows.Forms.DockStyle]::Fill
@@ -742,12 +773,61 @@ $lstOffline.ForeColor   = $Theme.TextPrimary
 $lstOffline.Font        = $Theme.FontSub
 $lstOffline.View        = [System.Windows.Forms.View]::Details
 $lstOffline.FullRowSelect = $true
+$lstOffline.CheckBoxes  = $true
 $lstOffline.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-$lstOffline.Columns.Add("Dosya Adı", 240) | Out-Null
-$lstOffline.Columns.Add("Tür", 90) | Out-Null
+$lstOffline.Columns.Add("Dosya Adı", 280) | Out-Null
+$lstOffline.Columns.Add("Tür", 140) | Out-Null
 $lstOffline.Columns.Add("Boyut", 90) | Out-Null
-$lstOffline.Columns.Add("Algılanan Sessiz Parametre", 240) | Out-Null
+$lstOffline.Columns.Add("Algılanan Sessiz Parametre", 320) | Out-Null
 $pnlPage3.Controls.Add($lstOffline)
+
+# Dock order: Fill first, Top last
+$lstOffline.BringToFront()
+
+function Update-OfflineInstallersList {
+    $lstOffline.Items.Clear()
+    $instDir = Join-Path $Script:UIRoot "Installers"
+    if (-not (Test-Path $instDir)) {
+        try { New-Item -ItemType Directory -Path $instDir -Force | Out-Null } catch {}
+    }
+
+    $installers = @()
+    if (Get-Command Get-CustomInstallersList -ErrorAction SilentlyContinue) {
+        $installers = Get-CustomInstallersList -Directory $instDir
+    }
+
+    if ($installers -and $installers.Count -gt 0) {
+        foreach ($inst in $installers) {
+            $lvi = New-Object System.Windows.Forms.ListViewItem($inst.FileName)
+            $lvi.SubItems.Add($inst.DetectedType) | Out-Null
+            $lvi.SubItems.Add("$($inst.SizeMB) MB") | Out-Null
+            $lvi.SubItems.Add($inst.SilentArgs) | Out-Null
+            $lvi.Checked = $true
+            $lvi.Tag     = $inst
+            $lstOffline.Items.Add($lvi) | Out-Null
+        }
+    } else {
+        $lvi = New-Object System.Windows.Forms.ListViewItem("Henüz çevrimdışı yükleyici eklenmedi.")
+        $lvi.SubItems.Add("--") | Out-Null
+        $lvi.SubItems.Add("--") | Out-Null
+        $lvi.SubItems.Add("Installers klasörüne .exe / .msi dosyaları kopyalayarak otomatik kurulum sağlayabilirsiniz.") | Out-Null
+        $lvi.Checked = $false
+        $lvi.ForeColor = $Theme.TextMuted
+        $lstOffline.Items.Add($lvi) | Out-Null
+    }
+}
+
+$btnOpenInstallers.Add_Click({
+    $instDir = Join-Path $Script:UIRoot "Installers"
+    if (-not (Test-Path $instDir)) {
+        try { New-Item -ItemType Directory -Path $instDir -Force | Out-Null } catch {}
+    }
+    Start-Process "explorer.exe" -ArgumentList "`"$instDir`""
+})
+
+$btnRefreshInstallers.Add_Click({
+    Update-OfflineInstallersList
+})
 
 # --- Wizard Page 4: Live Execution ---
 $pnlPage4 = New-Object System.Windows.Forms.Panel
@@ -981,7 +1061,10 @@ function Set-WizardPage {
     switch ($PageNum) {
         1 { $lblNavStatus.Text = "Hazır. Sistem donanım özetini inceleyip ilerleyin." }
         2 { $lblNavStatus.Text = "Kurulum adımlarını ve paketleri seçin." }
-        3 { $lblNavStatus.Text = "Özel yükleyicileri gözden geçirin ve Başlat'a tıklayın." }
+        3 { 
+            $lblNavStatus.Text = "Özel yükleyicileri gözden geçirin ve Başlat'a tıklayın."
+            Update-OfflineInstallersList
+        }
         4 { $lblNavStatus.Text = "Kurulum yürütülüyor... Lütfen bekleyin." }
         5 { $lblNavStatus.Text = "Tüm işlemler tamamlandı." }
     }
@@ -1062,20 +1145,20 @@ function Update-GpuCenterCard {
         $driverVer = $ctrl.DriverVersion
 
         $card = New-Object System.Windows.Forms.Panel
-        $card.Width     = 520
-        $card.Height    = 220
+        $card.Width     = 530
+        $card.Height    = 240
         $card.BackColor = $Theme.BgCard
-        $card.Margin    = New-Object System.Windows.Forms.Padding(8)
-        $card.Padding   = New-Object System.Windows.Forms.Padding(14)
+        $card.Margin    = New-Object System.Windows.Forms.Padding(10)
+        $card.Padding   = New-Object System.Windows.Forms.Padding(16)
 
         $lblTitle = New-Object System.Windows.Forms.Label
         $lblTitle.Text        = "🎮 $gpuName"
         $lblTitle.Font        = $Theme.FontCardHdr
         $lblTitle.ForeColor   = $Theme.AccentCyan
         $lblTitle.Dock        = [System.Windows.Forms.DockStyle]::Top
-        $lblTitle.Height      = 26
+        $lblTitle.Height      = 34
+        $lblTitle.TextAlign   = [System.Drawing.ContentAlignment]::MiddleLeft
         $lblTitle.UseMnemonic = $false
-        $card.Controls.Add($lblTitle)
 
         # Match with GPU Database
         $vendorKey = "Virtual"
@@ -1107,19 +1190,18 @@ function Update-GpuCenterCard {
         $lblDetails = New-Object System.Windows.Forms.Label
         $lblDetails.Font        = $Theme.FontCardTxt
         $lblDetails.ForeColor   = $Theme.TextPrimary
-        $lblDetails.Dock        = [System.Windows.Forms.DockStyle]::Top
-        $lblDetails.Height      = 90
+        $lblDetails.Dock        = [System.Windows.Forms.DockStyle]::Fill
+        $lblDetails.TextAlign   = [System.Drawing.ContentAlignment]::MiddleLeft
+        $lblDetails.Padding     = New-Object System.Windows.Forms.Padding(4, 6, 4, 6)
         $lblDetails.Text        = "Üretici         : $vendorKey`r`n" +
                                   "Sürücü Sürümü   : $driverVer`r`n" +
                                   "Önerilen Yazılım: $recApp`r`n" +
                                   "Yazılım Durumu  : $softwareStatus"
         $lblDetails.UseMnemonic = $false
-        $card.Controls.Add($lblDetails)
 
         $btnRow = New-Object System.Windows.Forms.Panel
         $btnRow.Dock      = [System.Windows.Forms.DockStyle]::Bottom
-        $btnRow.Height    = 34
-        $card.Controls.Add($btnRow)
+        $btnRow.Height    = 36
 
         $btnInstallGpu = New-Object System.Windows.Forms.Button
         $btnInstallGpu.Text      = if ($isInstalled) { "Yeniden Kur / Güncelle" } else { "Yazılımı Kur" }
@@ -1144,6 +1226,11 @@ function Update-GpuCenterCard {
         $btnExportDrv.FlatAppearance.BorderColor = $Theme.Border
         $btnExportDrv.Cursor    = [System.Windows.Forms.Cursors]::Hand
         $btnRow.Controls.Add($btnExportDrv)
+
+        # Proper WinForms dock stack order: Fill first, Bottom next, Top last
+        $card.Controls.Add($lblDetails)
+        $card.Controls.Add($btnRow)
+        $card.Controls.Add($lblTitle)
 
         # Event Handlers
         $capturedProf = $matchedProfile
@@ -1338,11 +1425,14 @@ $uiTimer.Add_Tick({
             if ($specs) {
                 $boxCpu.Label.Text     = "$($specs.Processor.Name)`r`n$($specs.Processor.Cores) Çekirdek / $($specs.Processor.LogicalProcessors) İş Parçacığı | $($specs.Processor.MaxClockGHz) GHz"
                 $gpus = $specs.Display.GPUs
-                $gpuText = ($gpus | ForEach-Object { "$($_.Vendor): $($_.Name) ($([math]::Round($_.VRAM_MB/1024,1)) GB)" }) -join "`r`n"
+                $gpuText = ($gpus | ForEach-Object {
+                    $vramStr = if ($_.VRAM_MB -gt 512) { "$([math]::Round($_.VRAM_MB/1024,1)) GB" } elseif ($_.VRAM_MB -gt 0) { "$($_.VRAM_MB) MB" } else { "Sistem Paylaşımlı" }
+                    "$($_.Vendor): $($_.Name) ($vramStr)"
+                }) -join "`r`n"
                 $boxGpu.Label.Text     = $gpuText
                 $boxRam.Label.Text     = "$($specs.Memory.TotalGB) GB ($($specs.Memory.ModuleCount) modül) | $($specs.Memory.Speed) MHz"
                 $disks = $specs.Storage.Disks
-                $boxDisk.Label.Text    = ($disks | ForEach-Object { "$($_.Index): $($_.Model) ($($_.SizeGB) GB)" }) -join "`r`n"
+                $boxDisk.Label.Text    = ($disks | ForEach-Object { "$($_.Index) [$($_.Model)] ($($_.SizeGB) GB - Boş: $($_.FreeGB) GB)" }) -join "`r`n"
                 $boxMother.Label.Text  = "$($specs.Motherboard.Manufacturer) $($specs.Motherboard.Product)`r`nBIOS: $($specs.Motherboard.BIOSVersion)"
                 $boxNetwork.Label.Text = "$($specs.Network.Adapters.Count) Ağ Bağdaştırıcısı Aktif"
 
@@ -1587,7 +1677,10 @@ $form.Add_FormClosing({
 })
 
 $form.Add_FormClosed({
-    [System.Windows.Forms.Application]::ExitThread()
+    try { $uiTimer.Stop(); $uiTimer.Dispose() } catch {}
+    try { $telemetryTimer.Stop(); $telemetryTimer.Dispose() } catch {}
+    try { [System.Windows.Forms.Application]::ExitThread() } catch {}
+    [System.Diagnostics.Process]::GetCurrentProcess().Kill()
 })
 #endregion
 

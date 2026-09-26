@@ -97,16 +97,26 @@ class Program
 
                 var psi = new ProcessStartInfo
                 {
-                    FileName         = "powershell.exe",
-                    Arguments        = psArgs,
-                    UseShellExecute  = false,
-                    CreateNoWindow   = true,
-                    WorkingDirectory = exeDir
+                    FileName               = "powershell.exe",
+                    Arguments              = psArgs,
+                    UseShellExecute        = false,
+                    CreateNoWindow         = true,
+                    RedirectStandardError  = true,
+                    WorkingDirectory       = exeDir
                 };
 
                 using (var proc = Process.Start(psi))
                 {
+                    string stdErr = proc.StandardError.ReadToEnd();
                     proc.WaitForExit();
+                    if (proc.ExitCode != 0 && !string.IsNullOrWhiteSpace(stdErr))
+                    {
+                        MessageBox.Show(
+                            "PowerShell betiği beklenmeyen bir hata ile sonlandı (Kod: " + proc.ExitCode + "):\n\n" + stdErr,
+                            "Çalıştırma Hatası",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    }
                     return proc.ExitCode;
                 }
             }

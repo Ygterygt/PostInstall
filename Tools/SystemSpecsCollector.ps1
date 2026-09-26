@@ -88,6 +88,7 @@ function Get-SystemHealthSummary {
             DriverDate    = $driverDate
             IsDiscrete    = $isDiscrete
             Status        = $g.Status
+            AdapterRAM    = $g.AdapterRAM
         }
         $gpuListSummary += $gpuItem
 
@@ -201,5 +202,98 @@ function Get-SystemHealthSummary {
         Volumes        = $volumes
         Disks          = $disks
         Warnings       = $warnings
+    }
+}
+
+function Get-SystemSpecsSnapshot {
+    [CmdletBinding()]
+    param()
+
+    $health = Get-SystemHealthSummary
+
+    # CPU Clock
+    $cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
+    $maxClockGHz = if ($cpu -and $cpu.MaxClockSpeed) { [math]::Round($cpu.MaxClockSpeed / 1000.0, 2) } else { 0 }
+
+    # GPU mapping with real VRAM
+    $gpus = @()
+    foreach ($g in $health.GPUList) {
+        $vramMB = if ($g.AdapterRAM -and $g.AdapterRAM -gt 0) { [math]::Round($g.AdapterRAM / 1MB) } else { 0 }
+        $gpus += [PSCustomObject]@{
+            Name          = $g.Name
+            Vendor        = $g.Vendor
+            DriverVersion = $g.DriverVersion
+            VRAM_MB       = $vramMB
+        }
+    }
+
+    # RAM stick count
+    $ramList = Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue
+    $ramCount = if ($ramList) { @($ramList).Count } else { 1 }
+
+    # Drive volumes via high-speed DriveInfo
+    $disks = @()
+    try {
+        $drives = [System.IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and $_.DriveType -eq [System.IO.DriveType]::Fixed }
+        foreach ($d in $drives) {
+            $label = if ([string]::IsNullOrWhiteSpace($d.VolumeLabel)) { "Yerel Disk" } else { $d.VolumeLabel }
+            $disks += [PSCustomObject]@{
+                Model       = $label
+                SizeGB      = [math]::Round($d.TotalSize / 1GB, 1)
+                FreeGB      = [math]::Round($d.TotalFreeSpace / 1GB, 1)
+                Index       = $d.Name.TrimEnd('\')
+            }
+        }
+    } catch {}
+
+    # Network
+    $netAdapters = Get-CimInstance Win32_NetworkAdapter -Filter "NetConnectionStatus = 2" -ErrorAction SilentlyContinue
+
+    # Secure Boot
+    $secBoot = $false
+    try {
+        $secBoot = (Confirm-SecureBootUEFI -ErrorAction SilentlyContinue) -eq $true
+    } catch {}
+
+    $totalRamNum = 0
+    if ($health.RAMTotal -match "([0-9\.]+)") { $totalRamNum = $Matches[1] }
+    $ramSpeedNum = 0
+    if ($health.RAMSpeedActual -match "([0-9\.]+)") { $ramSpeedNum = $Matches[1] }
+
+    return [PSCustomObject]@{
+        Processor       = [PSCustomObject]@{
+            Name              = $health.CPU
+            Cores             = if ($cpu) { $cpu.NumberOfCores } else { 0 }
+            LogicalProcessors = if ($cpu) { $cpu.NumberOfLogicalProcessors } else { 0 }
+            MaxClockGHz       = $maxClockGHz
+        }
+        Display         = [PSCustomObject]@{
+            GPUs = $gpus
+        }
+        Memory          = [PSCustomObject]@{
+            TotalGB     = $totalRamNum
+            Speed       = $ramSpeedNum
+            ModuleCount = $ramCount
+        }
+        Storage         = [PSCustomObject]@{
+            Disks = $disks
+        }
+        Motherboard     = [PSCustomObject]@{
+            Manufacturer = $health.Motherboard
+            Product      = ""
+            BIOSVersion  = $health.BIOSVersion
+        }
+        Network         = [PSCustomObject]@{
+            Adapters = @($netAdapters)
+        }
+        Platform        = [PSCustomObject]@{
+            FormFactor        = $health.ChassisType
+            SecureBoot        = $secBoot
+            IsVirtualMachine  = $health.IsVM
+        }
+        OperatingSystem = [PSCustomObject]@{
+            Caption     = $health.OSName
+            BuildNumber = $health.OSBuild
+        }
     }
 }
