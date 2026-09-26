@@ -56,10 +56,11 @@ class Program
 
                 var psi = new ProcessStartInfo
                 {
-                    FileName        = "powershell.exe",
-                    Arguments       = psArgs,
-                    Verb            = "runas",          // UAC elevation request
-                    UseShellExecute = true,
+                    FileName         = "powershell.exe",
+                    Arguments        = psArgs,
+                    Verb             = "runas",          // UAC elevation request
+                    UseShellExecute  = true,
+                    WindowStyle      = ProcessWindowStyle.Hidden,
                     WorkingDirectory = exeDir
                 };
 
@@ -108,13 +109,22 @@ class Program
                 {
                     FileName         = "powershell.exe",
                     Arguments        = psArgs,
-                    UseShellExecute  = false,
+                    UseShellExecute  = true,
+                    WindowStyle      = ProcessWindowStyle.Hidden,
                     WorkingDirectory = exeDir
                 };
 
                 using (var proc = Process.Start(psi))
                 {
                     proc.WaitForExit();
+                    if (proc.ExitCode != 0)
+                    {
+                        MessageBox.Show(
+                            "PostInstallUI.ps1 beklenmedik bir şekilde sonlandı (Çıkış Kodu: " + proc.ExitCode + ").",
+                            "Çalışma Uyarısı",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                    }
                     return proc.ExitCode;
                 }
             }

@@ -12,13 +12,23 @@ if %errorLevel% neq 0 (
 
 :: Yonetici olarak calisiyor - Script dizinine konumlan
 cd /d "%~dp0"
-echo [BASARILI] Yonetici olarak baslatildi.
-echo [BILGI] Computer Maintenance Pro Suite baslatiliyor...
+echo ======================================================================
+echo   Computer Maintenance Pro - Enterprise System Care Suite v4.0
+echo ======================================================================
+echo [BILGI] Uygulama baslatiliyor, lutfen bekleyin...
+echo.
 
 if exist "%~dp0PostInstall.exe" (
-    start "" "%~dp0PostInstall.exe" %*
+    "%~dp0PostInstall.exe" %*
 ) else (
     powershell.exe -NoProfile -Sta -ExecutionPolicy Bypass -File "%~dp0PostInstallUI.ps1" %*
 )
 
-exit /b %errorlevel%
+if %errorLevel% neq 0 (
+    echo.
+    echo [HATA] Uygulama cikis kodu ile sonlandi: %errorLevel%
+    echo Sorun gidermek icin herhangi bir tusa basin...
+    pause >nul
+)
+
+exit /b %errorLevel%

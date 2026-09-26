@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Computer Maintenance Pro - Enterprise GUI Suite v4.0.0
