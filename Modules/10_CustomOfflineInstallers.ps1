@@ -69,6 +69,12 @@ foreach ($item in $installers) {
         continue
     }
 
+    # Without an explicit wizard selection, never reinstall the same (or an older) version
+    if ($SelectedFileNames.Count -eq 0 -and $item.IsInstalled) {
+        Write-Output "[SKIP] $($item.FileName): $($item.ProductName) v$($item.InstalledVersion) zaten kurulu (paket v$($item.ProductVersion))."
+        continue
+    }
+
     Write-Output "[INFO] ========================================================"
     Write-Output "[INFO] Kurulum: $($item.FileName) ($($item.SizeMB) MB)"
     Write-Output "[INFO] Tespit Edilen Tur: $($item.DetectedType)"

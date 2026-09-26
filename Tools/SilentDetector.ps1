@@ -67,6 +67,18 @@ function Get-InstallerSignature {
 
         $asciiString = [System.Text.Encoding]::ASCII.GetString($bytes)
 
+        # NVIDIA packages (NVIDIA App, display drivers) are 7-Zip SFX wrappers around NVIDIA's own
+        # setup.exe: the generic 7-Zip switches would only extract and then open the setup UI.
+        if ($fvi.CompanyName -like "*NVIDIA*") {
+            return @{
+                Type        = "NVIDIA Installer (7-Zip SFX)"
+                Installer   = $FilePath
+                SilentArgs  = "-s -noreboot"
+                Command     = "`"$FilePath`" -s -noreboot"
+                Description = "NVIDIA Kurulum Paketi"
+            }
+        }
+
         # Inno Setup Detection
         if ($desc -like "*Inno Setup*" -or $asciiString -like "*Inno Setup*" -or $asciiString -like "*jr.InnoSetup*") {
             return @{
@@ -175,6 +187,36 @@ function Get-InstallerSignature {
     }
 }
 
+function Get-InstallerInstallState {
+    <#
+    .SYNOPSIS
+        Compares an installer's ProductName/ProductVersion with what is already installed
+        (Uninstall registry + AppX), so re-runs don't reinstall the same or older version.
+    #>
+    param([Parameter(Mandatory)][string]$FilePath)
+
+    $state = [PSCustomObject]@{ ProductName = ""; ProductVersion = ""; IsInstalled = $false; InstalledVersion = "" }
+    if ([System.IO.Path]::GetExtension($FilePath) -ne ".exe") { return $state }   # MSI reports 1638 itself
+
+    $fvi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($FilePath)
+    $state.ProductName    = "$($fvi.ProductName)".Trim()
+    $state.ProductVersion = "$($fvi.ProductVersion)".Trim()
+
+    # Generic bootstrapper names would match unrelated software
+    if ($state.ProductName.Length -lt 4 -or $state.ProductName -match '^(setup|installer|install|bootstrapper|update)$') { return $state }
+
+    if (-not (Get-Command Get-InstalledAppInfo -ErrorAction SilentlyContinue)) {
+        . (Join-Path $PSScriptRoot "PackageEngine.ps1")
+    }
+    $info = Get-InstalledAppInfo -Name $state.ProductName -RegistryPattern $state.ProductName
+    if ($info.IsInstalled) {
+        $state.InstalledVersion = $info.InstalledVersion
+        # Only "installed" when the installed build is the same or newer than the package
+        $state.IsInstalled = (-not $state.ProductVersion) -or ((Compare-AppVersion -InstalledVersion $info.InstalledVersion -TargetVersion $state.ProductVersion) -ge 0)
+    }
+    return $state
+}
+
 function Get-CustomInstallersList {
     param(
         [string]$Directory = (Join-Path (Split-Path -Parent $PSScriptRoot) "Installers")
@@ -191,17 +233,22 @@ function Get-CustomInstallersList {
     foreach ($f in $files) {
         $sig = Get-InstallerSignature -FilePath $f.FullName
         $sizeMB = [math]::Round($f.Length / 1MB, 2)
+        $inst = Get-InstallerInstallState -FilePath $f.FullName
 
         $list += [PSCustomObject]@{
-            FileName     = $f.Name
-            FullPath     = $f.FullName
-            SizeMB       = $sizeMB
-            DetectedType = $sig.Type
-            SilentArgs   = $sig.SilentArgs
-            Description  = $sig.Description
-            Selected     = $true
-            IsMsi        = [bool]$sig.IsMsi
-            IsAppx       = [bool]$sig.IsAppx
+            FileName         = $f.Name
+            FullPath         = $f.FullName
+            SizeMB           = $sizeMB
+            DetectedType     = $sig.Type
+            SilentArgs       = $sig.SilentArgs
+            Description      = $sig.Description
+            ProductName      = $inst.ProductName
+            ProductVersion   = $inst.ProductVersion
+            IsInstalled      = $inst.IsInstalled
+            InstalledVersion = $inst.InstalledVersion
+            Selected         = (-not $inst.IsInstalled)
+            IsMsi            = [bool]$sig.IsMsi
+            IsAppx           = [bool]$sig.IsAppx
         }
     }
 

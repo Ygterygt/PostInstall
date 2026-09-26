@@ -113,6 +113,8 @@ $Theme = @{
 $Script:MsgQueue      = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
 $Script:StatusQueue   = New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]'
 $Script:MaintMsgQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
+$Script:GpuMsgQueue   = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
+$Script:GpuDoneMarker = "@@GPU_JOB_DONE@@"
 $Script:IsRunning     = $false
 $Script:CurrentWizardPage = 1
 $Script:ActiveTab     = "Monitoring"
@@ -814,7 +816,8 @@ $lstOffline.BorderStyle = [System.Windows.Forms.BorderStyle]::None
 $lstOffline.Columns.Add("Dosya Adı", 280) | Out-Null
 $lstOffline.Columns.Add("Tür", 140) | Out-Null
 $lstOffline.Columns.Add("Boyut", 90) | Out-Null
-$lstOffline.Columns.Add("Algılanan Sessiz Parametre", 320) | Out-Null
+$lstOffline.Columns.Add("Algılanan Sessiz Parametre", 200) | Out-Null
+$lstOffline.Columns.Add("Durum", 200) | Out-Null
 $pnlPage3.Controls.Add($lstOffline)
 
 # Dock order: Fill first, Top last
@@ -839,7 +842,13 @@ function Update-OfflineInstallersList {
             $lvi.SubItems.Add($inst.DetectedType) | Out-Null
             $lvi.SubItems.Add("$($inst.SizeMB) MB") | Out-Null
             $lvi.SubItems.Add($inst.SilentArgs) | Out-Null
-            $lvi.Checked = $true
+            $stateText = if ($inst.IsInstalled) { "Kurulu (v$($inst.InstalledVersion)) - atlanır" }
+                         elseif ($inst.InstalledVersion) { "Güncellenecek (v$($inst.InstalledVersion) → v$($inst.ProductVersion))" }
+                         else { "Kurulacak" }
+            $lvi.SubItems.Add($stateText) | Out-Null
+            # Already-installed packages start unchecked; ticking them forces a reinstall
+            $lvi.Checked = [bool]$inst.Selected
+            if ($inst.IsInstalled) { $lvi.ForeColor = $Theme.TextMuted }
             $lvi.Tag     = $inst
             $lstOffline.Items.Add($lvi) | Out-Null
         }
@@ -956,6 +965,17 @@ $flpGpuCards.Dock        = [System.Windows.Forms.DockStyle]::Fill
 $flpGpuCards.AutoScroll  = $true
 $flpGpuCards.BackColor   = $Theme.BgMain
 $pnlTabGpu.Controls.Add($flpGpuCards)
+
+# GPU operations log stays on this tab (installs used to jump to the Maintenance tab)
+$rtbGpuLog = New-Object System.Windows.Forms.RichTextBox
+$rtbGpuLog.Dock        = [System.Windows.Forms.DockStyle]::Bottom
+$rtbGpuLog.Height      = 150
+$rtbGpuLog.BackColor   = $Theme.BgConsole
+$rtbGpuLog.ForeColor   = $Theme.TextPrimary
+$rtbGpuLog.Font        = $Theme.FontMono
+$rtbGpuLog.BorderStyle = [System.Windows.Forms.BorderStyle]::None
+$rtbGpuLog.ReadOnly    = $true
+$pnlTabGpu.Controls.Add($rtbGpuLog)
 $flpGpuCards.BringToFront()
 #endregion
 
@@ -1174,6 +1194,20 @@ if (Test-Path $Script:SpecsPath) {
 #endregion
 
 #region --- GPU Center Cards Population (Tab 4) ---
+function Write-GpuLog {
+    param([string]$Message)
+    $line = if ($Message -match '^\[\d{2}:\d{2}:\d{2}\]') { $Message } else { "[$((Get-Date).ToString('HH:mm:ss'))] $Message" }
+    $rtbGpuLog.SelectionStart  = $rtbGpuLog.TextLength
+    $rtbGpuLog.SelectionLength = 0
+    $rtbGpuLog.SelectionColor  = if ($line -match "\[SUCCESS\]|\[SKIP\]") { $Theme.AccentGreen }
+                                 elseif ($line -match "\[WARN\]|\[UPGRADE\]") { $Theme.AccentAmber }
+                                 elseif ($line -match "\[ERROR\]") { $Theme.AccentRed }
+                                 else { $Theme.TextPrimary }
+    $rtbGpuLog.AppendText("$line`r`n")
+    $rtbGpuLog.ScrollToCaret()
+    $rtbUnifiedConsole.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [GPU] $Message`r`n")
+}
+
 function Update-GpuCenterCard {
     $flpGpuCards.Controls.Clear()
     $controllers = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue
@@ -1263,14 +1297,15 @@ function Update-GpuCenterCard {
         $btnInstallGpu.Tag = [PSCustomObject]@{ Profile = $matchedProfile; App = $recApp }
         $btnInstallGpu.Add_Click({
             $info = $this.Tag
-            Switch-AppTab -TabName "Maintenance"
             if (-not $info.Profile) {
-                $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] Bu GPU için tanımlı destek yazılımı yok.`r`n")
+                Write-GpuLog "Bu GPU için tanımlı destek yazılımı yok."
                 return
             }
-            $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] GPU Destek Yazılımı Kurulumu: $($info.App)...`r`n")
+            $this.Enabled = $false
+            $this.Text    = "Kuruluyor..."
+            Write-GpuLog "GPU Destek Yazılımı Kurulumu: $($info.App)..."
             Start-ScriptBlockAsync -Track -ScriptBlock {
-                param($p, $app, $q, $pkgPath)
+                param($p, $app, $q, $pkgPath, $doneMarker)
                 try {
                     . $pkgPath
                     $res = Install-GpuCompanionApp -GpuProfile $p -ForceReinstall 6>&1 |
@@ -1280,13 +1315,16 @@ function Update-GpuCenterCard {
                 } catch {
                     $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] $app kurulum hatası: $($_.Exception.Message)")
                 }
-            } -ArgumentList @($info.Profile, $info.App, $Script:MaintMsgQueue, $Script:PackageEnginePath) | Out-Null
+                # Tells the UI timer to rebuild the cards so the new install state is shown
+                $q.Enqueue($doneMarker)
+            } -ArgumentList @($info.Profile, $info.App, $Script:GpuMsgQueue, $Script:PackageEnginePath, $Script:GpuDoneMarker) | Out-Null
         })
 
         $btnExportDrv.Add_Click({
-            $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] Sistem sürücüleri %ProgramData%\ComputerMaintenancePro\Backups\Drivers klasörüne yedekleniyor...`r`n")
+            $this.Enabled = $false
+            Write-GpuLog "Sistem sürücüleri %ProgramData%\ComputerMaintenancePro\Backups\Drivers klasörüne yedekleniyor..."
             Start-ScriptBlockAsync -Track -ScriptBlock {
-                param($path, $q)
+                param($path, $q, $doneMarker)
                 try {
                     if (Test-Path $path) { . $path }
                     $res = Export-SystemDrivers
@@ -1298,7 +1336,8 @@ function Update-GpuCenterCard {
                 } catch {
                     $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Sürücü yedekleme hatası: $($_.Exception.Message)")
                 }
-            } -ArgumentList @($Script:DriverEnginePath, $Script:MaintMsgQueue) | Out-Null
+                $q.Enqueue($doneMarker)
+            } -ArgumentList @($Script:DriverEnginePath, $Script:GpuMsgQueue, $Script:GpuDoneMarker) | Out-Null
         })
 
         $flpGpuCards.Controls.Add($card)
@@ -1538,6 +1577,17 @@ $uiTimer.Add_Tick({
         $appended = $true
     }
     if ($appended) { $rtbLog.ScrollToCaret() }
+
+    # 2b. GPU Center Log Queue (installs / driver backup stay on the GPU tab)
+    $gMsg = ""
+    while ($Script:GpuMsgQueue.TryDequeue([ref]$gMsg)) {
+        if ([string]::IsNullOrEmpty($gMsg)) { continue }
+        if ($gMsg -eq $Script:GpuDoneMarker) {
+            try { Update-GpuCenterCard } catch { Write-GpuLog "[WARN] Kartlar yenilenemedi: $($_.Exception.Message)" }
+            continue
+        }
+        Write-GpuLog $gMsg
+    }
 
     # 2. Maintenance Log Queue
     $mMsg = ""
