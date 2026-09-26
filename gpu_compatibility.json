@@ -1,0 +1,115 @@
+﻿{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "Version": "1.0.0",
+  "LastUpdated": "2026-09-26",
+  "Vendors": {
+    "NVIDIA": {
+      "VendorId": "10DE",
+      "VendorName": "NVIDIA Corporation",
+      "ControlPanelPackage": "9NF8H0H7WMLT",
+      "Profiles": [
+        {
+          "Id": "NVIDIA_MODERN_GEFORCE",
+          "Name": "NVIDIA GeForce RTX / GTX (Modern)",
+          "Pattern": "(RTX|GTX 16|GTX 10[5-8]0|GeForce RTX [2345]0)",
+          "RecommendedApp": "NVIDIA App",
+          "WinGetId": "Nvidia.NvidiaApp",
+          "AltWinGetId": "XP8CLZL93F5Z4P",
+          "DirectDownloadUrl": "https://tr.download.nvidia.com/nvapp/client/installer/NVIDIA_app_beta.exe",
+          "RegistryDisplayName": "NVIDIA (App|GeForce Experience)",
+          "Type": "Gaming"
+        },
+        {
+          "Id": "NVIDIA_LEGACY_GEFORCE",
+          "Name": "NVIDIA GeForce Legacy (GTX 900 / 700 / 600)",
+          "Pattern": "(GTX [679][0-9]0|GT [67][0-9]0)",
+          "RecommendedApp": "NVIDIA GeForce Experience",
+          "WinGetId": "Nvidia.GeForceExperience",
+          "DirectDownloadUrl": "https://us.download.nvidia.com/GFE/GFEClient/3.28.0.417/GeForce_Experience_v3.28.0.417.exe",
+          "RegistryDisplayName": "NVIDIA GeForce Experience",
+          "Type": "Legacy"
+        },
+        {
+          "Id": "NVIDIA_PROFESSIONAL",
+          "Name": "NVIDIA RTX Professional / Quadro",
+          "Pattern": "(Quadro|RTX [0-9]000 Ada|RTX A[0-9]{3,4})",
+          "RecommendedApp": "NVIDIA RTX Desktop Manager",
+          "WinGetId": "Nvidia.RTXDesktopManager",
+          "DirectDownloadUrl": "https://www.nvidia.com/object/quadro-certified-drivers.html",
+          "RegistryDisplayName": "NVIDIA RTX Desktop Manager",
+          "Type": "Workstation"
+        }
+      ]
+    },
+    "AMD": {
+      "VendorId": "1002",
+      "VendorName": "Advanced Micro Devices, Inc.",
+      "ControlPanelPackage": "AdvancedMicroDevicesInc.AMDSoftwareAdrenalinEdition",
+      "Profiles": [
+        {
+          "Id": "AMD_MODERN_RADEON",
+          "Name": "AMD Radeon RX & RDNA iGPU (Adrenalin)",
+          "Pattern": "(RX [4-9][0-9]{2,3}|Radeon [6789][0-9]{2}M|Radeon Graphics|Radeon Vega|RDNA)",
+          "RecommendedApp": "AMD Software: Adrenalin Edition",
+          "WinGetId": "AdvancedMicroDevicesInc.AMDSoftwareAdrenalinEdition",
+          "DirectDownloadUrl": "https://drivers.amd.com/drivers/installer/24.10/beta/amd-software-adrenalin-edition-auto-detect-installer.exe",
+          "RegistryDisplayName": "AMD Software",
+          "Type": "Gaming"
+        },
+        {
+          "Id": "AMD_PRO_WORKSTATION",
+          "Name": "AMD Radeon PRO Workstation",
+          "Pattern": "(Radeon PRO|FirePro|W[0-9]{4})",
+          "RecommendedApp": "AMD Software: PRO Edition",
+          "WinGetId": "AdvancedMicroDevicesInc.AMDSoftwarePROEdition",
+          "DirectDownloadUrl": "https://www.amd.com/en/support/download/drivers.html",
+          "RegistryDisplayName": "AMD Software: PRO Edition",
+          "Type": "Workstation"
+        }
+      ]
+    },
+    "Intel": {
+      "VendorId": "8086",
+      "VendorName": "Intel Corporation",
+      "ControlPanelPackage": "9PLFNLNT3G52",
+      "Profiles": [
+        {
+          "Id": "INTEL_ARC_DISCRETE",
+          "Name": "Intel Arc Discrete Graphics (A/B-Series)",
+          "Pattern": "(Arc.*(A[0-9]{3}|B[0-9]{3})|Intel Arc)",
+          "RecommendedApp": "Intel Arc Control & Driver",
+          "WinGetId": "Intel.ArcControl",
+          "DirectDownloadUrl": "https://downloadmirror.intel.com/drivers/arc/gfx_win_101.5972.exe",
+          "RegistryDisplayName": "Intel Arc Control",
+          "Type": "Gaming"
+        },
+        {
+          "Id": "INTEL_IRIS_UHD",
+          "Name": "Intel Iris Xe & UHD Graphics",
+          "Pattern": "(Iris.*Xe|UHD Graphics|HD Graphics)",
+          "RecommendedApp": "Intel Driver & Support Assistant (DSA)",
+          "WinGetId": "Intel.IntelDriverAndSupportAssistant",
+          "DirectDownloadUrl": "https://downloadmirror.intel.com/28425/a08/Intel-Driver-and-Support-Assistant-Installer.exe",
+          "RegistryDisplayName": "Intel Driver & Support Assistant",
+          "Type": "General"
+        }
+      ]
+    },
+    "Virtual": {
+      "VendorId": "15AD",
+      "VendorName": "VMware / VirtualBox / Hyper-V",
+      "Profiles": [
+        {
+          "Id": "VM_GRAPHICS",
+          "Name": "Virtual Machine Guest Display Adapter",
+          "Pattern": "(VMware SVGA|VirtualBox Graphics|Microsoft Hyper-V Video|Basic Display)",
+          "RecommendedApp": "VM Guest Integrations / Tools",
+          "WinGetId": "",
+          "DirectDownloadUrl": "",
+          "RegistryDisplayName": "Guest Additions|VMware Tools",
+          "Type": "Virtual"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,132 @@
+﻿[
+  {
+    "Id": "00_SystemSnapshotAndBackup",
+    "Order": 1,
+    "Title": "Sistem Geri Yükleme Noktası & Güvenlik Snapshot Yedeği",
+    "Description": "Olası hatalara karşı Windows VSS Sistem Geri Yükleme Noktası oluşturur ve Kayıt Defteri / Ortam Değişkenleri yedeğini alır.",
+    "Script": "Modules\\00_SystemSnapshotAndBackup.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": false,
+    "Critical": false
+  },
+  {
+    "Id": "01_SystemBaseline",
+    "Order": 2,
+    "Title": "Sistem Temel Yapılandırması & Güç Optimizasyonu",
+    "Description": "Yüksek performans güç planı, SSD TRIM kontrolü, telemetri optimizasyonu, Gezgin ayarları ve servis yapılandırması.",
+    "Script": "Modules\\01_SystemBaseline.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": true,
+    "Critical": true
+  },
+  {
+    "Id": "02_StorageAndDisks",
+    "Order": 3,
+    "Title": "Depolama Mimarisi & NVMe Analizi",
+    "Description": "Tüm disklerin ve NVMe depolama havuzunun salt okunur analizi ve TRIM optimizasyonu. Formatlama yapılmaz.",
+    "Script": "Modules\\02_StorageAndDisks.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": false,
+    "Critical": false
+  },
+  {
+    "Id": "03_WindowsUpdateAndHygiene",
+    "Order": 4,
+    "Title": "Sistem Bakimi, DISM Bilesen Deposu & Windows Hijyeni",
+    "Description": "DISM bilesen temizligi, Windows Update indirme onbellegi tasfiyesi, gecici dosya temizligi ve olay gunlugu bakimi.",
+    "Script": "Modules\\03_WindowsUpdateAndHygiene.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": true,
+    "Critical": false
+  },
+  {
+    "Id": "04_CoreRuntimes",
+    "Order": 5,
+    "Title": "Temel Çalışma Zamanları (Visual C++ & .NET)",
+    "Description": "Microsoft Visual C++ 2015-2022 (x86 & x64) BITS indirmeli sessiz kurulum. .NET Framework sürüm raporu.",
+    "Script": "Modules\\04_CoreRuntimes.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": true,
+    "Critical": true
+  },
+  {
+    "Id": "05_HardwareAndDrivers",
+    "Order": 6,
+    "Title": "Donanım & Sürücü Sağlık Taraması",
+    "Description": "Evrensel GPU (NVIDIA/AMD/Intel), ağ sürücüleri ve Aygıt Yöneticisi hata taraması, RAM XMP kontrolü.",
+    "Script": "Modules\\05_HardwareAndDrivers.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": true,
+    "Critical": false
+  },
+  {
+    "Id": "06_DeveloperTools",
+    "Order": 7,
+    "Title": "Geliştirici Araçları, Yapay Zeka & Uygulamalar",
+    "Description": "Dev: Git, Python 3.12, Node.js LTS, VS Code, PowerShell 7+, 7-Zip, Notepad++. AI: Antigravity, Claude, ChatGPT. Tarayıcı: Chrome, Opera GX. Oyun: Xbox.",
+    "Script": "Modules\\06_DeveloperTools.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": false,
+    "Critical": false
+  },
+  {
+    "Id": "07_EnvironmentAndPaths",
+    "Order": 8,
+    "Title": "Ortam Değişkenleri & Geliştirici Yolları (PATH)",
+    "Description": "Sistem PATH değişkenlerinin yenilenmesi, Win32 broadcast ile anında aktarım ve kullanıcı çalışma alanının ayarlanması.",
+    "Script": "Modules\\07_EnvironmentAndPaths.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": false,
+    "Critical": true
+  },
+  {
+    "Id": "09_SystemUpdates",
+    "Order": 9,
+    "Title": "Sistem Güncellemeleri & Sürücü Yönetimi",
+    "Description": "Dinamik GPU sürücü yönetimi (NVIDIA/AMD/Intel), Chipset kontrolü, Universal BIOS güncelleme rehberi ve Windows Update taraması.",
+    "Script": "Modules\\09_SystemUpdates.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": true,
+    "Critical": false
+  },
+  {
+    "Id": "10_CustomOfflineInstallers",
+    "Order": 10,
+    "Title": "Çevrimdışı & Özel Yükleyiciler (EXE / MSI / MSIX)",
+    "Description": "C:\\PostInstall\\Installers dizinindeki kullanıcı paketlerinin otomatik sessiz parametre tespiti ile sırayla kurulması.",
+    "Script": "Modules\\10_CustomOfflineInstallers.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": true,
+    "Critical": false
+  },
+  {
+    "Id": "11_NetworkAndDNSOptimization",
+    "Order": 11,
+    "Title": "Ağ, DNS & İnternet Hızlandırma",
+    "Description": "TCP Window Auto-Tuning, RSS çoklu çekirdek optimizasyonu ve düşük gecikmeli güvenli Cloudflare / Google DNS yapılandırması.",
+    "Script": "Modules\\11_NetworkAndDNSOptimization.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": false,
+    "Critical": false
+  },
+  {
+    "Id": "12_SecurityBaseline",
+    "Order": 12,
+    "Title": "Kurumsal Güvenlik Tabanı & Defender Sıkılaştırma",
+    "Description": "UAC bütünlüğü, Windows Defender SmartScreen, bulut tabanlı koruma, SMBv1 kapatma ve BitLocker sürücü şifreleme denetimi.",
+    "Script": "Modules\\12_SecurityBaseline.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": false,
+    "Critical": false
+  },
+  {
+    "Id": "08_PostInstallAudit",
+    "Order": 13,
+    "Title": "Nihai Doğrulama, Denetim & Raporlama",
+    "Description": "Tüm kurulum bileşenlerinin doğrulanması, kurulum loglarının arşivlenmesi ve Docs klasörüne kapsamlı rapor yazılması.",
+    "Script": "Modules\\08_PostInstallAudit.ps1",
+    "RequiresReboot": false,
+    "AllowRebootIfTriggered": false,
+    "Critical": true
+  }
+]

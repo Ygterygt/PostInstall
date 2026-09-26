@@ -1,0 +1,20 @@
+# ==============================================================================
+# Antigravity Computer Maintenance Pro - .gitignore
+# ==============================================================================
+
+# Installer binaries (GitHub 100MB limit & distribution binaries)
+Installers/*
+!Installers/.gitkeep
+!Installers/README.md
+
+# Runtime State & Cache
+State/TestSandbox_*
+State/*.tmp
+*.tmp
+
+# Local logs
+*.log
+Installers/debug.log
+
+# Temporary test outputs
+TestResults.json.tmp
