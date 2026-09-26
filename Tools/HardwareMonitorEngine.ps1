@@ -64,9 +64,23 @@ function Get-LiveTelemetrySample {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
     # 1. CPU Load & Clock
-    $cpu = Get-CimInstance Win32_Processor | Select-Object LoadPercentage, CurrentClockSpeed -First 1
-    $cpuLoad = if ($null -ne $cpu.LoadPercentage) { [int]$cpu.LoadPercentage } else { 0 }
-    $clockGhz = if ($cpu.CurrentClockSpeed) { [Math]::Round($cpu.CurrentClockSpeed / 1000.0, 2) } else { $cache.CpuMaxClockGHz }
+    $cpuLoad = 0
+    try {
+        if (-not $Script:CpuPerfCounter) {
+            $Script:CpuPerfCounter = New-Object System.Diagnostics.PerformanceCounter("Processor", "% Processor Time", "_Total")
+            [void]$Script:CpuPerfCounter.NextValue()
+        }
+        $cpuLoad = [Math]::Min(100, [Math]::Max(0, [int]$Script:CpuPerfCounter.NextValue()))
+    } catch {
+        try {
+            $perfCpu = Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'" -ErrorAction SilentlyContinue
+            if ($perfCpu -and ($null -ne $perfCpu.PercentProcessorTime)) {
+                $cpuLoad = [int]$perfCpu.PercentProcessorTime
+            }
+        } catch {}
+    }
+
+    $clockGhz = $cache.CpuMaxClockGHz
 
     # CPU Temperature
     $cpuTempC = $null
@@ -78,8 +92,20 @@ function Get-LiveTelemetrySample {
     } catch {}
 
     # 2. RAM Usage
-    $os = Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory -First 1
-    $ramFreeGB = [Math]::Round($os.FreePhysicalMemory / 1MB, 2)
+    $ramFreeGB = 0
+    try {
+        if (-not $Script:MemPerfCounter) {
+            $Script:MemPerfCounter = New-Object System.Diagnostics.PerformanceCounter("Memory", "Available MBytes")
+            [void]$Script:MemPerfCounter.NextValue()
+        }
+        $freeMB = [double]$Script:MemPerfCounter.NextValue()
+        $ramFreeGB = [Math]::Round($freeMB / 1024.0, 2)
+    } catch {
+        try {
+            $os = Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory -First 1
+            $ramFreeGB = [Math]::Round($os.FreePhysicalMemory / 1MB, 2)
+        } catch {}
+    }
     $ramUsedGB = [Math]::Max(0, [Math]::Round($cache.TotalRamGB - $ramFreeGB, 2))
     $ramPct = if ($cache.TotalRamGB -gt 0) { [Math]::Round(($ramUsedGB / $cache.TotalRamGB) * 100, 1) } else { 0 }
 
@@ -125,24 +151,25 @@ function Get-LiveTelemetrySample {
         })
     }
 
-    # 4. Storage Live Telemetry
+    # 4. Storage Live Telemetry (using high-speed .NET DriveInfo)
     $diskLive = [System.Collections.Generic.List[PSCustomObject]]::new()
-    $volumes = Get-Volume -ErrorAction SilentlyContinue | Where-Object { 
-        $_.DriveLetter -and $_.DriveType -eq 'Fixed' -and $_.Size -gt 0 
-    }
-    foreach ($vol in $volumes) {
-        $dTotalGB = [Math]::Round($vol.Size / 1GB, 1)
-        $dFreeGB  = [Math]::Round($vol.SizeRemaining / 1GB, 1)
-        $dUsedGB  = [Math]::Round($dTotalGB - $dFreeGB, 1)
-        $dPctUsed = if ($dTotalGB -gt 0) { [Math]::Round(($dUsedGB / $dTotalGB) * 100, 1) } else { 0 }
-        $diskLive.Add([PSCustomObject]@{
-            DriveLetter    = "$($vol.DriveLetter):"
-            Label          = $vol.FileSystemLabel
-            TotalGB        = $dTotalGB
-            FreeGB         = $dFreeGB
-            LoadPercentage = $dPctUsed
-        })
-    }
+    try {
+        $drives = [System.IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and $_.DriveType -eq [System.IO.DriveType]::Fixed }
+        foreach ($d in $drives) {
+            $dTotalGB = [Math]::Round($d.TotalSize / 1GB, 1)
+            $dFreeGB  = [Math]::Round($d.TotalFreeSpace / 1GB, 1)
+            $dUsedGB  = [Math]::Round($dTotalGB - $dFreeGB, 1)
+            $dPctUsed = if ($dTotalGB -gt 0) { [Math]::Round(($dUsedGB / $dTotalGB) * 100, 1) } else { 0 }
+            $cleanLetter = $d.Name.TrimEnd('\')
+            $diskLive.Add([PSCustomObject]@{
+                DriveLetter    = $cleanLetter
+                Label          = $d.VolumeLabel
+                TotalGB        = $dTotalGB
+                FreeGB         = $dFreeGB
+                LoadPercentage = $dPctUsed
+            })
+        }
+    } catch {}
 
     # 5. Battery
     $battery = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue

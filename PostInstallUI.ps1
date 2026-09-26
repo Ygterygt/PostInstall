@@ -106,6 +106,50 @@ $Script:MaintMsgQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueu
 $Script:IsRunning     = $false
 $Script:CurrentWizardPage = 1
 $Script:ActiveTab     = "Monitoring"
+
+$Script:TelemetryJob        = $null
+$Script:LastTelemetryUpdate = [DateTime]::MinValue
+
+function Start-ScriptBlockAsync {
+    param(
+        [Parameter(Mandatory=$true)][scriptblock]$ScriptBlock,
+        [object[]]$ArgumentList = @()
+    )
+    $rs = [runspacefactory]::CreateRunspace()
+    $rs.ApartmentState = [System.Threading.ApartmentState]::STA
+    $rs.ThreadOptions  = [System.Management.Automation.Runspaces.PSThreadOptions]::ReuseThread
+    $rs.Open()
+    $ps = [powershell]::Create()
+    $ps.Runspace = $rs
+    [void]$ps.AddScript($ScriptBlock.ToString())
+    foreach ($arg in $ArgumentList) {
+        [void]$ps.AddArgument($arg)
+    }
+    $async = $ps.BeginInvoke()
+    return [PSCustomObject]@{
+        Runspace    = $rs
+        PowerShell  = $ps
+        AsyncResult = $async
+    }
+}
+
+function Stop-ScriptBlockAsync {
+    param($Job)
+    if ($Job) {
+        try {
+            if ($Job.PowerShell) {
+                $Job.PowerShell.Stop()
+                $Job.PowerShell.Dispose()
+            }
+        } catch {}
+        try {
+            if ($Job.Runspace) {
+                $Job.Runspace.Close()
+                $Job.Runspace.Dispose()
+            }
+        } catch {}
+    }
+}
 #endregion
 
 #region --- Main Window Form ---
@@ -175,6 +219,19 @@ function New-TabNavBtn {
     $btn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $btn.FlatAppearance.BorderSize = 0
     $btn.Cursor    = [System.Windows.Forms.Cursors]::Hand
+
+    $btn.Add_MouseEnter({
+        if ($Script:ActiveTab -ne $this.Tag) {
+            $this.ForeColor = $Theme.TextPrimary
+            $this.BackColor = [System.Drawing.Color]::FromArgb(38, 44, 54)
+        }
+    })
+    $btn.Add_MouseLeave({
+        if ($Script:ActiveTab -ne $this.Tag) {
+            $this.ForeColor = $Theme.TextMuted
+            $this.BackColor = $Theme.BgCard
+        }
+    })
     return $btn
 }
 
@@ -261,9 +318,8 @@ function New-MetricCard {
     $lblHdr.Font        = $Theme.FontCardHdr
     $lblHdr.ForeColor   = if ($BadgeColor -and ($BadgeColor -ne [System.Drawing.Color]::Empty)) { $BadgeColor } else { $Theme.TextPrimary }
     $lblHdr.Dock        = [System.Windows.Forms.DockStyle]::Top
-    $lblHdr.Height      = 24
+    $lblHdr.Height      = 26
     $lblHdr.UseMnemonic = $false
-    $card.Controls.Add($lblHdr)
 
     $lblVal = New-Object System.Windows.Forms.Label
     $lblVal.Text        = "--"
@@ -273,7 +329,6 @@ function New-MetricCard {
     $lblVal.Height      = 38
     $lblVal.TextAlign   = [System.Drawing.ContentAlignment]::MiddleLeft
     $lblVal.UseMnemonic = $false
-    $card.Controls.Add($lblVal)
 
     $pb = New-Object System.Windows.Forms.ProgressBar
     $pb.Dock      = [System.Windows.Forms.DockStyle]::Top
@@ -281,7 +336,6 @@ function New-MetricCard {
     $pb.Maximum   = 100
     $pb.Value     = 0
     $pb.Style     = [System.Windows.Forms.ProgressBarStyle]::Continuous
-    $card.Controls.Add($pb)
 
     $lblSub = New-Object System.Windows.Forms.Label
     $lblSub.Text        = "Yükleniyor..."
@@ -290,7 +344,12 @@ function New-MetricCard {
     $lblSub.Dock        = [System.Windows.Forms.DockStyle]::Fill
     $lblSub.TextAlign   = [System.Drawing.ContentAlignment]::MiddleLeft
     $lblSub.UseMnemonic = $false
+
+    # Dock addition order: Fill first, then middle Top controls, then top-most Header last
     $card.Controls.Add($lblSub)
+    $card.Controls.Add($pb)
+    $card.Controls.Add($lblVal)
+    $card.Controls.Add($lblHdr)
 
     return @{
         Panel       = $card
@@ -362,15 +421,12 @@ function New-MaintActionButton {
     $lbl.Dock        = [System.Windows.Forms.DockStyle]::Top
     $lbl.Height      = 24
     $lbl.UseMnemonic = $false
-    $card.Controls.Add($lbl)
-
     $lblD = New-Object System.Windows.Forms.Label
     $lblD.Text        = $Desc
     $lblD.Font        = $Theme.FontSub
     $lblD.ForeColor   = $Theme.TextMuted
     $lblD.Dock        = [System.Windows.Forms.DockStyle]::Fill
     $lblD.UseMnemonic = $false
-    $card.Controls.Add($lblD)
 
     $btn = New-Object System.Windows.Forms.Button
     $btn.Text      = "Uygula"
@@ -382,7 +438,11 @@ function New-MaintActionButton {
     $btn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $btn.FlatAppearance.BorderColor = $Theme.Border
     $btn.Cursor    = [System.Windows.Forms.Cursors]::Hand
+
+    # Proper WinForms dock stack order: Fill first, Bottom next, Top last
+    $card.Controls.Add($lblD)
     $card.Controls.Add($btn)
+    $card.Controls.Add($lbl)
 
     return @{ Panel = $card; Button = $btn }
 }
@@ -791,6 +851,56 @@ $pnlTabConsole.BackColor = $Theme.BgMain
 $pnlTabConsole.Padding   = New-Object System.Windows.Forms.Padding(16, 12, 16, 12)
 $pnlContent.Controls.Add($pnlTabConsole)
 
+$pnlConsoleBar = New-Object System.Windows.Forms.Panel
+$pnlConsoleBar.Dock      = [System.Windows.Forms.DockStyle]::Top
+$pnlConsoleBar.Height    = 40
+$pnlConsoleBar.BackColor = $Theme.BgMain
+
+$lblConsoleHdr = New-Object System.Windows.Forms.Label
+$lblConsoleHdr.Text        = "📜 Tüm Sistem Olayları & Konsol Günlüğü"
+$lblConsoleHdr.Font        = $Theme.FontHeader
+$lblConsoleHdr.ForeColor   = $Theme.AccentCyan
+$lblConsoleHdr.Dock        = [System.Windows.Forms.DockStyle]::Left
+$lblConsoleHdr.Width       = 380
+$lblConsoleHdr.TextAlign   = [System.Drawing.ContentAlignment]::MiddleLeft
+$lblConsoleHdr.UseMnemonic = $false
+$pnlConsoleBar.Controls.Add($lblConsoleHdr)
+
+$pnlConsoleActions = New-Object System.Windows.Forms.FlowLayoutPanel
+$pnlConsoleActions.Dock      = [System.Windows.Forms.DockStyle]::Right
+$pnlConsoleActions.Width     = 420
+$pnlConsoleActions.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+$pnlConsoleActions.BackColor = [System.Drawing.Color]::Transparent
+$pnlConsoleBar.Controls.Add($pnlConsoleActions)
+
+$btnClearConsole = New-Object System.Windows.Forms.Button
+$btnClearConsole.Text      = "🗑️ Temizle"
+$btnClearConsole.Font      = $Theme.FontButton
+$btnClearConsole.Size      = New-Object System.Drawing.Size(110, 30)
+$btnClearConsole.BackColor = $Theme.BgInput
+$btnClearConsole.ForeColor = $Theme.TextPrimary
+$btnClearConsole.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$btnClearConsole.FlatAppearance.BorderColor = $Theme.Border
+$btnClearConsole.Cursor    = [System.Windows.Forms.Cursors]::Hand
+$btnClearConsole.Add_Click({ $rtbUnifiedConsole.Clear() })
+$pnlConsoleActions.Controls.Add($btnClearConsole)
+
+$btnCopyConsole = New-Object System.Windows.Forms.Button
+$btnCopyConsole.Text      = "📋 Kopyala"
+$btnCopyConsole.Font      = $Theme.FontButton
+$btnCopyConsole.Size      = New-Object System.Drawing.Size(110, 30)
+$btnCopyConsole.BackColor = $Theme.BgInput
+$btnCopyConsole.ForeColor = $Theme.TextPrimary
+$btnCopyConsole.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$btnCopyConsole.FlatAppearance.BorderColor = $Theme.Border
+$btnCopyConsole.Cursor    = [System.Windows.Forms.Cursors]::Hand
+$btnCopyConsole.Add_Click({
+    if (-not [string]::IsNullOrEmpty($rtbUnifiedConsole.Text)) {
+        [System.Windows.Forms.Clipboard]::SetText($rtbUnifiedConsole.Text)
+    }
+})
+$pnlConsoleActions.Controls.Add($btnCopyConsole)
+
 $rtbUnifiedConsole = New-Object System.Windows.Forms.RichTextBox
 $rtbUnifiedConsole.Dock        = [System.Windows.Forms.DockStyle]::Fill
 $rtbUnifiedConsole.BackColor   = $Theme.BgConsole
@@ -798,7 +908,10 @@ $rtbUnifiedConsole.ForeColor   = $Theme.TextPrimary
 $rtbUnifiedConsole.Font        = $Theme.FontMono
 $rtbUnifiedConsole.BorderStyle = [System.Windows.Forms.BorderStyle]::None
 $rtbUnifiedConsole.ReadOnly    = $true
+
+# Dock order: Fill first, Top last
 $pnlTabConsole.Controls.Add($rtbUnifiedConsole)
+$pnlTabConsole.Controls.Add($pnlConsoleBar)
 #endregion
 
 #region --- Navigation & Tab Switching Logic ---
@@ -812,22 +925,33 @@ function Switch-AppTab {
     $pnlTabGpu.Visible     = ($TabName -eq "GpuCenter")
     $pnlTabConsole.Visible = ($TabName -eq "Console")
 
+    switch ($TabName) {
+        "Monitoring"  { $pnlTabMon.BringToFront() }
+        "Maintenance" { $pnlTabMaint.BringToFront() }
+        "Wizard"      { $pnlTabWizard.BringToFront() }
+        "GpuCenter"   { $pnlTabGpu.BringToFront() }
+        "Console"     { $pnlTabConsole.BringToFront() }
+    }
+
     foreach ($btn in $Script:NavTabButtons) {
         if ($btn.Tag -eq $TabName) {
             $btn.BackColor = $Theme.BgHeader
             $btn.ForeColor = $Theme.AccentCyan
+            $btn.FlatAppearance.BorderSize = 1
+            $btn.FlatAppearance.BorderColor = $Theme.AccentCyan
         } else {
             $btn.BackColor = $Theme.BgCard
             $btn.ForeColor = $Theme.TextMuted
+            $btn.FlatAppearance.BorderSize = 0
         }
     }
 }
 
-foreach ($btn in $Script:NavTabButtons) {
-    $btn.Add_Click({
-        Switch-AppTab -TabName $this.Tag
-    })
-}
+$btnTabMon.Add_Click({ Switch-AppTab -TabName "Monitoring" })
+$btnTabMaint.Add_Click({ Switch-AppTab -TabName "Maintenance" })
+$btnTabWizard.Add_Click({ Switch-AppTab -TabName "Wizard" })
+$btnTabGpu.Add_Click({ Switch-AppTab -TabName "GpuCenter" })
+$btnTabConsole.Add_Click({ Switch-AppTab -TabName "Console" })
 
 function Set-WizardPage {
     param([int]$PageNum)
@@ -906,26 +1030,25 @@ $btnPresetMin.Add_Click({
 #endregion
 
 #region --- Hardware Specs Population (Page 1) ---
-try {
-    if (Get-Command "Get-SystemSpecsSnapshot" -ErrorAction SilentlyContinue) {
-        $specs = Get-SystemSpecsSnapshot
-        $boxCpu.Label.Text     = "$($specs.Processor.Name)`r`n$($specs.Processor.Cores) Çekirdek / $($specs.Processor.LogicalProcessors) İş Parçacığı | $($specs.Processor.MaxClockGHz) GHz"
-        $gpus = $specs.Display.GPUs
-        $gpuText = ($gpus | ForEach-Object { "$($_.Vendor): $($_.Name) ($([math]::Round($_.VRAM_MB/1024,1)) GB)" }) -join "`r`n"
-        $boxGpu.Label.Text     = $gpuText
-        $boxRam.Label.Text     = "$($specs.Memory.TotalGB) GB ($($specs.Memory.ModuleCount) modül) | $($specs.Memory.Speed) MHz"
-        $disks = $specs.Storage.Disks
-        $boxDisk.Label.Text    = ($disks | ForEach-Object { "$($_.Index): $($_.Model) ($($_.SizeGB) GB)" }) -join "`r`n"
-        $boxMother.Label.Text  = "$($specs.Motherboard.Manufacturer) $($specs.Motherboard.Product)`r`nBIOS: $($specs.Motherboard.BIOSVersion)"
-        $boxNetwork.Label.Text = "$($specs.Network.Adapters.Count) Ağ Bağdaştırıcısı Aktif"
+$boxCpu.Label.Text     = "İşlemci özellikleri taranıyor..."
+$boxGpu.Label.Text     = "Grafik kartları algılanıyor..."
+$boxRam.Label.Text     = "Bellek taranıyor..."
+$boxDisk.Label.Text    = "Sürücüler taranıyor..."
+$boxMother.Label.Text  = "Anakart & BIOS taranıyor..."
+$boxNetwork.Label.Text = "Ağ bağdaştırıcıları taranıyor..."
 
-        $lblHealthBody.Text = "Form Faktör: $($specs.Platform.FormFactor)`r`n" +
-            "Güvenli Önyükleme (Secure Boot): $(if ($specs.Platform.SecureBoot) { 'Aktif' } else { 'Devre Dışı' }) | " +
-            "Sanal Makine: $(if ($specs.Platform.IsVirtualMachine) { 'Evet' } else { 'Fiziksel PC' })`r`n" +
-            "Windows Sürümü: $($specs.OperatingSystem.Caption) ($($specs.OperatingSystem.BuildNumber))"
-    }
-} catch {
-    [System.Diagnostics.Trace]::WriteLine("System specs rendering warning: $($_.Exception.Message)")
+$Script:SpecsJob = $null
+if (Test-Path $Script:SpecsPath) {
+    $specsCollector = $Script:SpecsPath
+    $Script:SpecsJob = Start-ScriptBlockAsync -ScriptBlock {
+        param($path)
+        try {
+            if (Test-Path $path) { . $path }
+            return (Get-SystemSpecsSnapshot)
+        } catch {
+            return $null
+        }
+    } -ArgumentList @($specsCollector)
 }
 #endregion
 
@@ -1028,19 +1151,29 @@ function Update-GpuCenterCard {
         $btnInstallGpu.Add_Click({
             Switch-AppTab -TabName "Maintenance"
             $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] GPU Destek Yazılımı Kurulumu: $capturedApp...`r`n")
-            Start-ThreadJob -ScriptBlock {
+            Start-ScriptBlockAsync -ScriptBlock {
                 param($p, $app, $q)
                 if ($p -and $p.WinGetId) {
                     & winget.exe install --id $p.WinGetId --silent --accept-package-agreements --accept-source-agreements
                     $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] $app kurulum süreci tamamlandı.")
                 }
-            } -ArgumentList $capturedProf, $capturedApp, $maintQueue | Out-Null
+            } -ArgumentList @($capturedProf, $capturedApp, $maintQueue) | Out-Null
         })
 
         $btnExportDrv.Add_Click({
             $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] Sistem sürücüleri C:\PostInstall\Backups\Drivers klasörüne yedekleniyor...`r`n")
-            Export-SystemDrivers | Out-Null
-            $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] Sürücüler başarıyla yedeklendi.`r`n")
+            $maintQ = $Script:MaintMsgQueue
+            $drvPath = $Script:DriverEnginePath
+            Start-ScriptBlockAsync -ScriptBlock {
+                param($path, $q)
+                try {
+                    if (Test-Path $path) { . $path }
+                    Export-SystemDrivers | Out-Null
+                    $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] Sürücüler başarıyla yedeklendi.")
+                } catch {
+                    $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Sürücü yedekleme hatası: $($_.Exception.Message)")
+                }
+            } -ArgumentList @($drvPath, $maintQ) | Out-Null
         })
 
         $flpGpuCards.Controls.Add($card)
@@ -1063,7 +1196,7 @@ function Invoke-AsyncMaintenanceAction {
     $q = $Script:MaintMsgQueue
     $maintPath = $Script:MaintEnginePath
     $jobBlock = $ActionBlock
-    Start-ThreadJob -ScriptBlock {
+    Start-ScriptBlockAsync -ScriptBlock {
         param($b, $queue, $name, $path)
         try {
             if (Test-Path $path) { . $path }
@@ -1072,7 +1205,7 @@ function Invoke-AsyncMaintenanceAction {
         } catch {
             $queue.Enqueue("[ERROR] $name sırasında hata: $($_.Exception.Message)")
         }
-    } -ArgumentList $jobBlock, $q, $ActionName, $maintPath | Out-Null
+    } -ArgumentList @($jobBlock, $q, $ActionName, $maintPath) | Out-Null
 }
 
 $mbtnTemp.Button.Add_Click({
@@ -1195,8 +1328,34 @@ $btnStart.Add_Click({ Start-InstallationProcess })
 # Fast UI log pump timer (100ms)
 $uiTimer = New-Object System.Windows.Forms.Timer
 $uiTimer.Interval = 100
-
 $uiTimer.Add_Tick({
+    # 0. Hardware Specs Background Job
+    if ($Script:SpecsJob -and $Script:SpecsJob.AsyncResult.IsCompleted) {
+        try {
+            $rawSpecs = $Script:SpecsJob.PowerShell.EndInvoke($Script:SpecsJob.AsyncResult)
+            $specs = $rawSpecs | Select-Object -Last 1
+            if ($specs) {
+                $boxCpu.Label.Text     = "$($specs.Processor.Name)`r`n$($specs.Processor.Cores) Çekirdek / $($specs.Processor.LogicalProcessors) İş Parçacığı | $($specs.Processor.MaxClockGHz) GHz"
+                $gpus = $specs.Display.GPUs
+                $gpuText = ($gpus | ForEach-Object { "$($_.Vendor): $($_.Name) ($([math]::Round($_.VRAM_MB/1024,1)) GB)" }) -join "`r`n"
+                $boxGpu.Label.Text     = $gpuText
+                $boxRam.Label.Text     = "$($specs.Memory.TotalGB) GB ($($specs.Memory.ModuleCount) modül) | $($specs.Memory.Speed) MHz"
+                $disks = $specs.Storage.Disks
+                $boxDisk.Label.Text    = ($disks | ForEach-Object { "$($_.Index): $($_.Model) ($($_.SizeGB) GB)" }) -join "`r`n"
+                $boxMother.Label.Text  = "$($specs.Motherboard.Manufacturer) $($specs.Motherboard.Product)`r`nBIOS: $($specs.Motherboard.BIOSVersion)"
+                $boxNetwork.Label.Text = "$($specs.Network.Adapters.Count) Ağ Bağdaştırıcısı Aktif"
+
+                $lblHealthBody.Text = "Form Faktör: $($specs.Platform.FormFactor)`r`n" +
+                    "Güvenli Önyükleme (Secure Boot): $(if ($specs.Platform.SecureBoot) { 'Aktif' } else { 'Devre Dışı' }) | " +
+                    "Sanal Makine: $(if ($specs.Platform.IsVirtualMachine) { 'Evet' } else { 'Fiziksel PC' })`r`n" +
+                    "Windows Sürümü: $($specs.OperatingSystem.Caption) ($($specs.OperatingSystem.BuildNumber))"
+            }
+        } catch {
+            [System.Diagnostics.Trace]::WriteLine("System specs background render warning: $($_.Exception.Message)")
+        }
+        Stop-ScriptBlockAsync $Script:SpecsJob
+        $Script:SpecsJob = $null
+    }
     # 1. Wizard Log Queue
     $msg = ""
     $appended = $false
@@ -1262,16 +1421,30 @@ $uiTimer.Add_Tick({
     }
 })
 
-# Telemetry Sampling Timer (2000ms)
+# Telemetry Sampling Timer (Fast 250ms UI ticker polling background worker)
 $telemetryTimer = New-Object System.Windows.Forms.Timer
-$telemetryTimer.Interval = 2000
+$telemetryTimer.Interval = 250
 
 $telemetryTimer.Add_Tick({
-    if ($Script:ActiveTab -ne "Monitoring") { return }
+    # If not on monitoring tab and initial data is already shown, idle
+    if ($Script:ActiveTab -ne "Monitoring" -and $Script:LastTelemetryUpdate -gt [DateTime]::MinValue) {
+        return
+    }
 
-    try {
-        if (Get-Command "Get-LiveTelemetrySample" -ErrorAction SilentlyContinue) {
-            $s = Get-LiveTelemetrySample
+    # Check if active background query finished
+    if ($Script:TelemetryJob -and $Script:TelemetryJob.AsyncResult.IsCompleted) {
+        try {
+            $rawRes = $Script:TelemetryJob.PowerShell.EndInvoke($Script:TelemetryJob.AsyncResult)
+            $s = $rawRes | Select-Object -Last 1
+        } catch {
+            [System.Diagnostics.Trace]::WriteLine("Telemetry end invoke error: $($_.Exception.Message)")
+            $s = $null
+        }
+        Stop-ScriptBlockAsync $Script:TelemetryJob
+        $Script:TelemetryJob = $null
+
+        if ($s) {
+            $Script:LastTelemetryUpdate = Get-Date
 
             # CPU
             $cardCpu.ValueLabel.Text   = "$($s.CpuLoadPct) %"
@@ -1329,44 +1502,89 @@ $telemetryTimer.Add_Tick({
                 $cardBat.ProgressBar.Value = 100
                 $cardBat.SubLabel.Text     = "Masaüstü İş İstasyonu (Pil Yok)"
             }
+
+            $lblMonStatus.Text = "Canlı Donanım & Performans Telemetrisi (Yenilenme: 2 sn | $($s.Timestamp))"
         }
-    } catch {
-        [System.Diagnostics.Trace]::WriteLine("Telemetry tick warning: $($_.Exception.Message)")
+    }
+
+    # Dispatch background query if none running and 2.0s elapsed (or initial load)
+    $elapsedSec = ((Get-Date) - $Script:LastTelemetryUpdate).TotalSeconds
+    if ($null -eq $Script:TelemetryJob -and ($elapsedSec -ge 2.0 -or $Script:LastTelemetryUpdate -eq [DateTime]::MinValue)) {
+        $hwPath = $Script:HwMonEnginePath
+        $Script:TelemetryJob = Start-ScriptBlockAsync -ScriptBlock {
+            param($path)
+            try {
+                if (Test-Path $path) { . $path }
+                return (Get-LiveTelemetrySample)
+            } catch {
+                return $null
+            }
+        } -ArgumentList @($hwPath)
     }
 })
 
 $btnRefreshMon.Add_Click({
-    # Force single tick
-    $telemetryTimer.Stop()
-    $telemetryTimer.Start()
+    $lblMonStatus.Text = "Canlı Donanım & Performans Telemetrisi (Yenileniyor...)"
+    if ($Script:TelemetryJob) {
+        Stop-ScriptBlockAsync $Script:TelemetryJob
+        $Script:TelemetryJob = $null
+    }
+    $hwPath = $Script:HwMonEnginePath
+    $Script:TelemetryJob = Start-ScriptBlockAsync -ScriptBlock {
+        param($path)
+        try {
+            if (Test-Path $path) { . $path }
+            return (Get-LiveTelemetrySample)
+        } catch {
+            return $null
+        }
+    } -ArgumentList @($hwPath)
 })
 #endregion
 
-#region --- Standard Button Handlers ---
+#region --- Standard Button Handlers & Form Lifecycle ---
 $btnOpenLog.Add_Click({
     $logPath = $Script:Config.LogFile
     if (Test-Path $logPath) { Start-Process "notepad.exe" -ArgumentList "`"$logPath`"" }
 })
 
 $btnClose.Add_Click({
-    if ($Script:IsRunning) {
-        $r = [System.Windows.Forms.MessageBox]::Show("Kurulum süreci devam ediyor. Kapatmak istiyor musunuz?", "Uyarı", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
-        if ($r -eq [System.Windows.Forms.DialogResult]::No) { return }
-    }
-    $uiTimer.Stop()
-    $telemetryTimer.Stop()
     $form.Close()
 })
 
 $form.Add_FormClosing({
-    $uiTimer.Stop()
-    $telemetryTimer.Stop()
+    param($sender, $e)
+    if ($Script:IsRunning) {
+        $r = [System.Windows.Forms.MessageBox]::Show("Kurulum süreci devam ediyor. Kapatmak istediğinizden emin misiniz?", "Uyarı", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($r -eq [System.Windows.Forms.DialogResult]::No) {
+            $e.Cancel = $true
+            return
+        }
+    }
+
+    try { $uiTimer.Stop() } catch {}
+    try { $telemetryTimer.Stop() } catch {}
+
+    if ($Script:TelemetryJob) {
+        Stop-ScriptBlockAsync $Script:TelemetryJob
+        $Script:TelemetryJob = $null
+    }
+
+    if ($Script:SpecsJob) {
+        Stop-ScriptBlockAsync $Script:SpecsJob
+        $Script:SpecsJob = $null
+    }
+
     try {
-        if ($Script:WorkerPS) { $Script:WorkerPS.Dispose() }
+        if ($Script:WorkerPS) { $Script:WorkerPS.Stop(); $Script:WorkerPS.Dispose() }
         if ($Script:WorkerRS) { $Script:WorkerRS.Close(); $Script:WorkerRS.Dispose() }
     } catch {
         [System.Diagnostics.Trace]::WriteLine("Form closing cleanup warning: $($_.Exception.Message)")
     }
+})
+
+$form.Add_FormClosed({
+    [System.Windows.Forms.Application]::ExitThread()
 })
 #endregion
 
@@ -1396,3 +1614,4 @@ $form.Add_Shown({
 $uiTimer.Start()
 $telemetryTimer.Start()
 [System.Windows.Forms.Application]::Run($form)
+[System.Environment]::Exit(0)
