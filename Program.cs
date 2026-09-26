@@ -1,6 +1,6 @@
 // Program.cs — Computer Maintenance Pro Enterprise Launcher v4.0
 // Compiles with: csc.exe (C# 5, .NET Framework 4.0+)
-// Purpose: UAC auto-elevation entry point -> launches PostInstallUI.ps1 as Administrator
+// Purpose: UAC auto-elevation entry point -> launches PostInstallUI.ps1 as Administrator without black console
 
 using System;
 using System.Diagnostics;
@@ -14,7 +14,6 @@ class Program
     [STAThread]
     static int Main(string[] args)
     {
-        // Resolve the directory containing this exe (works even when called from a different CWD)
         string exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         if (string.IsNullOrEmpty(exeDir))
             exeDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -41,26 +40,18 @@ class Program
 
         if (!isAdmin)
         {
-            // Request elevation via UAC
+            // Self-elevate PostInstall.exe as Administrator via UAC
             try
             {
-                string psArgs = string.Format(
-                    "-NoProfile -Sta -ExecutionPolicy Bypass -File \"{0}\"",
-                    uiScript);
-
-                // Pass through flags if present
-                bool resume = Array.IndexOf(args, "-Resume") >= 0 || Array.IndexOf(args, "/Resume") >= 0;
-                bool auto   = Array.IndexOf(args, "-Auto") >= 0 || Array.IndexOf(args, "/Auto") >= 0 || Array.IndexOf(args, "-Silent") >= 0;
-                if (resume) psArgs += " -Resume";
-                if (auto)   psArgs += " -Auto";
+                string exePath = Assembly.GetExecutingAssembly().Location;
+                string exeArgs = string.Join(" ", args);
 
                 var psi = new ProcessStartInfo
                 {
-                    FileName         = "powershell.exe",
-                    Arguments        = psArgs,
+                    FileName         = exePath,
+                    Arguments        = exeArgs,
                     Verb             = "runas",          // UAC elevation request
                     UseShellExecute  = true,
-                    WindowStyle      = ProcessWindowStyle.Hidden,
                     WorkingDirectory = exeDir
                 };
 
@@ -69,12 +60,11 @@ class Program
             }
             catch (System.ComponentModel.Win32Exception ex)
             {
-                // User cancelled UAC dialog (Error 1223)
                 if (ex.NativeErrorCode == 1223)
                 {
                     MessageBox.Show(
                         "Yönetici onayı iptal edildi.\n\n" +
-                        "Post-Installation Suite, doğru çalışabilmek için yönetici yetkisi gerektirir.\n" +
+                        "Computer Maintenance Pro, donanım ayarları ve sistem bakımı için yönetici yetkisi gerektirir.\n" +
                         "Lütfen UAC isteğini onaylayın.",
                         "Yetki Gerekli",
                         MessageBoxButtons.OK,
@@ -93,7 +83,7 @@ class Program
         }
         else
         {
-            // Already admin — launch directly without re-elevation
+            // Already admin — launch powershell with CreateNoWindow = true so NO black console appears
             try
             {
                 string psArgs = string.Format(
@@ -109,22 +99,14 @@ class Program
                 {
                     FileName         = "powershell.exe",
                     Arguments        = psArgs,
-                    UseShellExecute  = true,
-                    WindowStyle      = ProcessWindowStyle.Hidden,
+                    UseShellExecute  = false,
+                    CreateNoWindow   = true,
                     WorkingDirectory = exeDir
                 };
 
                 using (var proc = Process.Start(psi))
                 {
                     proc.WaitForExit();
-                    if (proc.ExitCode != 0)
-                    {
-                        MessageBox.Show(
-                            "PostInstallUI.ps1 beklenmedik bir şekilde sonlandı (Çıkış Kodu: " + proc.ExitCode + ").",
-                            "Çalışma Uyarısı",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Warning);
-                    }
                     return proc.ExitCode;
                 }
             }

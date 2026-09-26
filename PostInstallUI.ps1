@@ -1383,6 +1383,16 @@ if ($Resume -or $Auto) {
     Set-WizardPage 1
 }
 
+$form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+$form.ShowInTaskbar = $true
+$form.TopMost = $true
+$form.Add_Shown({
+    $form.Activate()
+    $form.BringToFront()
+    $form.Focus()
+    $form.TopMost = $false
+})
+
 $uiTimer.Start()
 $telemetryTimer.Start()
 [System.Windows.Forms.Application]::Run($form)
