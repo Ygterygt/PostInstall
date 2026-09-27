@@ -34,9 +34,9 @@ function Test-RegInstalled {
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
         "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
     )
-    $matches = Get-ItemProperty $paths -ErrorAction SilentlyContinue |
+    $found = Get-ItemProperty $paths -ErrorAction SilentlyContinue |
                Where-Object { $_.DisplayName -like "*$Pattern*" -and (!$Arch -or $_.DisplayName -like "*$Arch*") }
-    return @($matches)
+    return @($found)
 }
 
 Write-Output "[INFO] 08_PostInstallAudit: Sistem denetimi ve saglik dogrulamasi baslatiliyor..."

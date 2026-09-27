@@ -22,7 +22,6 @@ Write-Output "[INFO] UAC (Kullanici Hesabi Denetimi) guvenlik duzeyi denetleniyo
 try {
     $uacKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
     if (Test-Path $uacKey) {
-        $consent = (Get-ItemProperty $uacKey -Name "ConsentPromptBehaviorAdmin" -ErrorAction SilentlyContinue).ConsentPromptBehaviorAdmin
         $enableLua = (Get-ItemProperty $uacKey -Name "EnableLUA" -ErrorAction SilentlyContinue).EnableLUA
 
         if ($enableLua -ne 1) {

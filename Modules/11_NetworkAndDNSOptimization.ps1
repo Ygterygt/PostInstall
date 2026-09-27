@@ -46,7 +46,7 @@ foreach ($nic in $activeNics) {
 Write-Output "[INFO] TCP IP ag yigini optimizasyonu..."
 try {
     # Set TCP auto-tuning to normal (prevents network throttling on high-speed connections)
-    $tcpOut = & netsh.exe int tcp set global autotuninglevel=normal 2>&1
+    & netsh.exe int tcp set global autotuninglevel=normal 2>&1 | Out-Null
     Write-Output "[SUCCESS] TCP Window Auto-Tuning: Normal olarak ayarlandi."
 } catch {
     Write-Output "[WARN] TCP Auto-Tuning ayarlanamadi: $_"
@@ -115,7 +115,9 @@ try {
 
 Write-Output "[INFO] Baglanti ve gecikme (ping) dogrulamasi yapiliyor..."
 try {
-    $ping = Test-Connection -ComputerName "1.1.1.1" -Count 2 -ErrorAction SilentlyContinue
+    # Ping the first configured DNS server (public resolver) to verify connectivity
+    $pingTarget = if ($dnsServers -and $dnsServers.Count -gt 0) { [string]$dnsServers[0] } else { "1.1.1.1" }
+    $ping = Test-Connection -ComputerName $pingTarget -Count 2 -ErrorAction SilentlyContinue
     if ($ping) {
         $avgMs = [math]::Round(($ping | Measure-Object -Property ResponseTime -Average).Average, 1)
         Write-Output "[SUCCESS] Ag erisimi dogrulandi (Ortalama Gecikme: $avgMs ms)."
