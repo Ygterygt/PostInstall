@@ -220,6 +220,42 @@ Invoke-SuiteTest -Category "Unit" -Name "SchedulerEngine (settings, validation, 
     }
 }
 
+Invoke-SuiteTest -Category "Unit" -Name "ChangeJournal (track, no-op, undo newest-first, not-undoable)" -Body {
+    $sb = New-Sandbox "Journal"
+    $key = "HKCU:\Software\CMP_Test_Journal_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    $prevEnv = $env:CMP_CHANGE_JOURNAL
+    try {
+        $env:CMP_CHANGE_JOURNAL = Join-Path $sb "ChangeJournal.json"
+        . (Join-Path $Root "Tools\ChangeJournal.ps1")
+        New-Item $key -Force | Out-Null
+        Set-ItemProperty $key -Name "Existing" -Value 5 -Type DWord
+
+        $a = Set-TrackedRegistryValue -Path $key -Name "Existing" -Value 7 -Description "changed"
+        $b = Set-TrackedRegistryValue -Path $key -Name "Created" -Value "x" -Type String -Description "created"
+        $n = Set-TrackedRegistryValue -Path $key -Name "Existing" -Value 7 -Description "same"
+        Assert-True ($a -and $b -and $null -eq $n) "no-op writes must not be journaled"
+        # Twice changed value: undo newest-first must end at the ORIGINAL value
+        $c = Set-TrackedRegistryValue -Path $key -Name "Existing" -Value 9 -Description "changed again"
+        $x = Add-ChangeJournalEntry -Kind "Feature" -Target "SMB1Protocol" -PreviousValue "Enabled" -NewValue "Disabled" -NotUndoable
+        Assert-True (@(Get-ChangeJournal).Count -eq 4) "journal count"
+
+        $refused = Undo-ChangeJournalEntry -Id $x.Id
+        Assert-True (-not $refused.Success) "not-undoable entry refused"
+
+        $res = @(Undo-ChangeJournal)
+        Assert-True ($res.Count -eq 3 -and @($res | Where-Object { -not $_.Success }).Count -eq 0) "3 undone"
+        $k = Get-Item $key
+        Assert-True ($k.GetValue("Existing") -eq 5) "original value restored (got $($k.GetValue('Existing')))"
+        Assert-True ($k.GetValueNames() -notcontains "Created") "created value removed"
+        Assert-True (@(Get-ChangeJournal | Where-Object { $_.Reverted }).Count -eq 3) "entries marked reverted"
+        "journaled only real changes; newest-first undo restored originals; security entries protected"
+    } finally {
+        $env:CMP_CHANGE_JOURNAL = $prevEnv
+        Remove-Item $key -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $sb -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Invoke-SuiteTest -Category "Unit" -Name "Find-GpuProfile matching" -Body {
     . (Join-Path $Root "Tools\PackageEngine.ps1")
     $gpuJson = Get-Content -Path (Join-Path $Root "gpu_compatibility.json") -Raw -Encoding UTF8 | ConvertFrom-Json

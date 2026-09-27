@@ -4,19 +4,23 @@
     01_SystemBaseline.ps1 - Enterprise System Baseline & Performance Optimization
 .DESCRIPTION
     Applies safe, reversible enterprise best practices inspired by Sophia Script & WinUtil:
-    1. High Performance Power Plan & sleep timeout adjustment
+    1. Adaptive power plan & sleep timeouts (laptop: Balanced, desktop: High Performance)
     2. SSD TRIM verification and activation
     3. Windows Explorer productivity tweaks (show file extensions, show hidden files)
-    4. Windows Defender security intelligence / signature update
-    5. Windows Time (NTP) service synchronization
-    6. Essential service start types (wuauserv, BITS, w32time)
+    4. Privacy / sponsored-app preventions
+    5. Windows Defender security intelligence / signature update
+    6. Essential service start types (wuauserv, BITS, w32time) + NTP sync
+    Every setting change goes through Tools\ChangeJournal.ps1, so it can be undone from the UI.
 #>
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = "Continue"
+. (Join-Path (Split-Path -Parent $PSScriptRoot) "Tools\ChangeJournal.ps1")
 
 Write-Output "[INFO] 01_SystemBaseline: Sistem temel yapilandirmasi baslatiliyor..."
+$Script:ChangeCount = 0
+function Register-Change { param($Entry) if ($Entry) { $Script:ChangeCount++ } }
 
 #region === 1. POWER PLAN & SLEEP TIMEOUTS (ADAPTIVE: LAPTOP vs DESKTOP) ===
 Write-Output "[INFO] Guvenli ve Uyarlanabilir Guc Plani optimizasyonu..."
@@ -29,23 +33,23 @@ try {
 
     if ($isLaptop) {
         # Laptop: Balanced keeps turbo on AC but lets the CPU park on battery (High Performance drains it)
-        powercfg /setactive $balanced 2>&1 | Out-Null
-        powercfg /change monitor-timeout-ac 20 2>&1 | Out-Null
-        powercfg /change standby-timeout-ac 45 2>&1 | Out-Null
-        powercfg /change monitor-timeout-dc 5 2>&1 | Out-Null
-        powercfg /change standby-timeout-dc 15 2>&1 | Out-Null
+        Register-Change (Set-TrackedPowerPlan -Guid $balanced -Description "Guc plani: Dengeli (dizustu)")
+        Register-Change (Set-TrackedPowerTimeout -Setting monitor -Source ac -Minutes 20)
+        Register-Change (Set-TrackedPowerTimeout -Setting standby -Source ac -Minutes 45)
+        Register-Change (Set-TrackedPowerTimeout -Setting monitor -Source dc -Minutes 5)
+        Register-Change (Set-TrackedPowerTimeout -Setting standby -Source dc -Minutes 15)
         Write-Output "[SUCCESS] Dizustu Bilgisayar algilandi: 'Dengeli' plan + pil dostu uyku sureleri uygulandi."
     } else {
         # Desktop / Workstation / VM: High Performance if the plan exists (Modern Standby systems only ship Balanced)
         if ($available -match $highPerf) {
-            powercfg /setactive $highPerf 2>&1 | Out-Null
+            Register-Change (Set-TrackedPowerPlan -Guid $highPerf -Description "Guc plani: Yuksek Performans (masaustu)")
             Write-Output "[SUCCESS] Masaustu / Is Istasyonu algilandi: 'Yuksek Performans' plani aktif."
         } else {
             Write-Output "[NOTE] Yuksek Performans plani bu sistemde yok (Modern Standby). Dengeli plan korunuyor."
         }
-        powercfg /change standby-timeout-ac 0 2>&1 | Out-Null
-        powercfg /change monitor-timeout-ac 30 2>&1 | Out-Null
-        powercfg /change hibernate-timeout-ac 0 2>&1 | Out-Null
+        Register-Change (Set-TrackedPowerTimeout -Setting standby -Source ac -Minutes 0)
+        Register-Change (Set-TrackedPowerTimeout -Setting monitor -Source ac -Minutes 30)
+        Register-Change (Set-TrackedPowerTimeout -Setting hibernate -Source ac -Minutes 0)
         Write-Output "[SUCCESS] Prizde uyku devre disi, ekran 30 dk sonra kapanir."
     }
 } catch {
@@ -56,13 +60,10 @@ try {
 #region === 2. SSD TRIM VERIFICATION ===
 Write-Output "[INFO] SSD TRIM durumu kontrol ediliyor..."
 try {
-    $trimStatus = fsutil behavior query DisableDeleteNotify
-    if ($trimStatus -like "*= 0*") {
-        Write-Output "[SUCCESS] SSD TRIM aktif (DisableDeleteNotify = 0)."
-    } else {
-        fsutil behavior set DisableDeleteNotify 0 2>&1 | Out-Null
-        Write-Output "[SUCCESS] SSD TRIM basariyla etkinlestirildi."
-    }
+    $trim = Set-TrackedTrim
+    Register-Change $trim
+    if ($trim) { Write-Output "[SUCCESS] SSD TRIM basariyla etkinlestirildi." }
+    else       { Write-Output "[SUCCESS] SSD TRIM aktif (DisableDeleteNotify = 0)." }
 } catch {
     Write-Output "[WARN] TRIM sorgulama hatasi: $_"
 }
@@ -73,12 +74,9 @@ Write-Output "[INFO] Gelistirici & Sistem Yoneticisi Dosya Gezgini ayarlari uygu
 try {
     $advKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
     if (Test-Path $advKey) {
-        # Show file extensions (HideFileExt = 0)
-        Set-ItemProperty -Path $advKey -Name "HideFileExt" -Value 0 -Type DWord -Force
-        # Show hidden files and folders (Hidden = 1)
-        Set-ItemProperty -Path $advKey -Name "Hidden" -Value 1 -Type DWord -Force
-        # Launch Explorer to 'This PC' (1 = This PC, 2 = Quick Access)
-        Set-ItemProperty -Path $advKey -Name "LaunchTo" -Value 1 -Type DWord -Force
+        Register-Change (Set-TrackedRegistryValue -Path $advKey -Name "HideFileExt" -Value 0 -Description "Dosya uzantilarini goster")
+        Register-Change (Set-TrackedRegistryValue -Path $advKey -Name "Hidden" -Value 1 -Description "Gizli dosyalari goster")
+        Register-Change (Set-TrackedRegistryValue -Path $advKey -Name "LaunchTo" -Value 1 -Description "Gezgin 'Bu Bilgisayar' ile acilsin")
         Write-Output "[SUCCESS] Dosya Gezgini ayarlari uygulandi: Dosya uzantilari gorunur, Bu Bilgisayar acilisi aktif."
     }
 } catch {
@@ -90,28 +88,25 @@ try {
 Write-Output "[INFO] Gizlilik ve Tuketici Bloatware onleme politikalari uygulaniyor..."
 try {
     # 1. Disable Bing web results in Start menu (speeds up local file and app search)
-    $searchPolicyKey = "HKCU:\Software\Policies\Microsoft\Windows\Explorer"
-    if (-not (Test-Path $searchPolicyKey)) { New-Item -Path $searchPolicyKey -Force | Out-Null }
-    Set-ItemProperty -Path $searchPolicyKey -Name "DisableSearchBoxSuggestions" -Value 1 -Type DWord -Force
+    Register-Change (Set-TrackedRegistryValue -Path "HKCU:\Software\Policies\Microsoft\Windows\Explorer" -Name "DisableSearchBoxSuggestions" -Value 1 -Description "Baslat menusu web onerilerini kapat")
 
     $searchUserKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search"
     if (Test-Path $searchUserKey) {
-        Set-ItemProperty -Path $searchUserKey -Name "BingSearchEnabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+        Register-Change (Set-TrackedRegistryValue -Path $searchUserKey -Name "BingSearchEnabled" -Value 0 -Description "Bing aramasini kapat")
     }
 
     # 2. Prevent automatic installation of suggested sponsored consumer apps (TikTok, CandyCrush etc.)
     $cdmKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
     if (Test-Path $cdmKey) {
-        Set-ItemProperty -Path $cdmKey -Name "SilentInstalledAppsEnabled" -Value 0 -Type DWord -Force
-        Set-ItemProperty -Path $cdmKey -Name "SystemPaneSuggestionsEnabled" -Value 0 -Type DWord -Force
-        Set-ItemProperty -Path $cdmKey -Name "SubscribedContent-338388Enabled" -Value 0 -Type DWord -Force
-        Set-ItemProperty -Path $cdmKey -Name "SubscribedContent-338389Enabled" -Value 0 -Type DWord -Force
+        foreach ($n in @("SilentInstalledAppsEnabled", "SystemPaneSuggestionsEnabled", "SubscribedContent-338388Enabled", "SubscribedContent-338389Enabled")) {
+            Register-Change (Set-TrackedRegistryValue -Path $cdmKey -Name $n -Value 0 -Description "Sponsorlu uygulama/oneri kapat: $n")
+        }
     }
 
     # 3. Disable advertising identifier
     $adKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo"
     if (Test-Path $adKey) {
-        Set-ItemProperty -Path $adKey -Name "Enabled" -Value 0 -Type DWord -Force
+        Register-Change (Set-TrackedRegistryValue -Path $adKey -Name "Enabled" -Value 0 -Description "Reklam kimligini kapat")
     }
 
     Write-Output "[SUCCESS] Sistem gizlilik & arama optimizasyonu tamamlandi (Bing arama reklamlari ve sponsorlu appx'ler engellendi)."
@@ -150,7 +145,7 @@ $services = @(
 
 foreach ($s in $services) {
     try {
-        Set-Service -Name $s.Name -StartupType $s.Start -ErrorAction SilentlyContinue
+        Register-Change (Set-TrackedServiceStartType -Name $s.Name -StartType $s.Start -Description "Servis $($s.Name) -> $($s.Start)")
         if ($s.StartNow) { Start-Service -Name $s.Name -ErrorAction SilentlyContinue }
         Write-Output "[SUCCESS] Servis $($s.Name) -> $($s.Start)"
     } catch {
@@ -166,5 +161,6 @@ try {
 }
 #endregion
 
+Write-Output "[INFO] $Script:ChangeCount ayar degisikligi kaydedildi (Sistem Bakimi > Degisiklikleri Geri Al ile geri alinabilir)."
 Write-Output "[SUCCESS] 01_SystemBaseline adimi basariyla tamamlandi."
 exit 0

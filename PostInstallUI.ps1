@@ -152,6 +152,8 @@ if (Test-Path $Script:DriverEnginePath) { . $Script:DriverEnginePath }
 if (Test-Path $Script:PackageEnginePath){ . $Script:PackageEnginePath }
 if (Test-Path $Script:MaintEnginePath)  { . $Script:MaintEnginePath }
 if (Test-Path $Script:SchedulerEnginePath) { . $Script:SchedulerEnginePath }
+$Script:ChangeJournalPath = Join-Path $Script:UIRoot "Tools\ChangeJournal.ps1"
+if (Test-Path $Script:ChangeJournalPath) { . $Script:ChangeJournalPath }
 if (Test-Path $Script:HwMonEnginePath)  { . $Script:HwMonEnginePath }
 
 # Load GPU Database
@@ -634,7 +636,7 @@ function Update-SchedPanel {
         $st = Get-MaintenanceTaskStatus -TaskName $s.TaskName
         if (-not $st.Registered) {
             $lblSchedStatus.ForeColor = $Theme.TextMuted
-            $lblSchedStatus.Text = "Kapalı. İşlemleri ve zamanı seçip etkinleştirin (pildeyken çalışmaz; kaçırılırsa ilk fırsatta çalışır)."
+            $lblSchedStatus.Text = "Kapalı. İşlemleri ve zamanı seçip etkinleştirin."
         } else {
             $next = if ($st.NextRunTime) { $st.NextRunTime.ToString("dd.MM.yyyy HH:mm") } else { "-" }
             $last = if ($st.LastRunTime) {
@@ -683,6 +685,130 @@ $btnSchedRemove.Add_Click({
     }
     Update-SchedPanel
 })
+
+# Change journal dialog (CMP-25): lists every setting the modules changed and reverts selected ones
+function Format-JournalValue {
+    param($Entry, [string]$Which)
+    if ($Which -eq "Prev" -and $Entry.Kind -eq "Registry" -and -not $Entry.PreviousExists) { return "(yoktu)" }
+    $v = if ($Which -eq "Prev") { $Entry.PreviousValue } else { $Entry.NewValue }
+    if ($null -eq $v -or "$v" -eq "") { return "-" }
+    if ($Entry.Kind -eq "PowerSetting") { return "{0} dk" -f [Math]::Round([int]$v / 60) }
+    return "$v"
+}
+
+function Show-ChangeJournalDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text            = "Yapılan Değişiklikler ve Geri Alma"
+    $dlg.Size            = New-Object System.Drawing.Size(1000, 560)
+    $dlg.StartPosition   = [System.Windows.Forms.FormStartPosition]::CenterParent
+    $dlg.BackColor       = $Theme.BgMain
+    $dlg.ForeColor       = $Theme.TextPrimary
+    $dlg.MinimizeBox     = $false
+    $dlg.ShowInTaskbar   = $false
+
+    $lblInfo = New-Object System.Windows.Forms.Label
+    $lblInfo.Dock        = [System.Windows.Forms.DockStyle]::Top
+    $lblInfo.Height      = 44
+    $lblInfo.Padding     = New-Object System.Windows.Forms.Padding(12, 6, 12, 0)
+    $lblInfo.Font        = $Theme.FontSub
+    $lblInfo.ForeColor   = $Theme.TextMuted
+    $lblInfo.UseMnemonic = $false
+    $lblInfo.Text        = "Kurulum modüllerinin değiştirdiği ayarlar ve önceki değerleri. Seçilenler en yeniden en eskiye doğru önceki değerine döndürülür.`r`nGüvenliği düşüreceği için UAC ve SMBv1 değişiklikleri listelenir ama geri alınmaz. Güç/servis/sistem ayarları için uygulama yönetici olarak açık olmalıdır."
+
+    $lv = New-Object System.Windows.Forms.ListView
+    $lv.Dock          = [System.Windows.Forms.DockStyle]::Fill
+    $lv.View          = [System.Windows.Forms.View]::Details
+    $lv.CheckBoxes    = $true
+    $lv.FullRowSelect = $true
+    $lv.BackColor     = $Theme.BgCard
+    $lv.ForeColor     = $Theme.TextPrimary
+    $lv.Font          = $Theme.FontSub
+    $lv.BorderStyle   = [System.Windows.Forms.BorderStyle]::None
+    foreach ($col in @(@("Tarih", 120), @("Modül", 150), @("Açıklama", 330), @("Önceki", 120), @("Yeni", 120), @("Durum", 120))) {
+        $lv.Columns.Add($col[0], $col[1]) | Out-Null
+    }
+
+    $pnlBtns = New-Object System.Windows.Forms.FlowLayoutPanel
+    $pnlBtns.Dock          = [System.Windows.Forms.DockStyle]::Bottom
+    $pnlBtns.Height        = 46
+    $pnlBtns.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+    $pnlBtns.Padding       = New-Object System.Windows.Forms.Padding(8)
+    $pnlBtns.BackColor     = $Theme.BgHeader
+
+    $btnClose = New-UpdBarButton "Kapat" 90 $Theme.BgInput $Theme.TextPrimary
+    $btnUndo  = New-UpdBarButton "↩️ Seçilileri Geri Al" 170 $Theme.AccentAmber ([System.Drawing.Color]::Black)
+    $btnAll   = New-UpdBarButton "Tümünü Seç" 100 $Theme.BgInput $Theme.TextPrimary
+    $pnlBtns.Controls.AddRange(@($btnClose, $btnUndo, $btnAll))
+
+    $fill = {
+        $lv.Items.Clear()
+        $entries = @(Get-ChangeJournal) | Sort-Object { $_.Timestamp } -Descending
+        foreach ($e in $entries) {
+            $when = try { ([datetime]$e.Timestamp).ToString("dd.MM.yyyy HH:mm") } catch { "$($e.Timestamp)" }
+            $lvi = New-Object System.Windows.Forms.ListViewItem($when)
+            $desc = if ($e.Description) { $e.Description } else { "$($e.Target) $($e.Name)" }
+            foreach ($v in @($e.Module, $desc, (Format-JournalValue $e "Prev"), (Format-JournalValue $e "New"))) { $lvi.SubItems.Add([string]$v) | Out-Null }
+            $state = if ($e.Reverted) { "Geri alındı" } elseif (-not $e.Undoable) { "Geri alınmaz" } else { "Uygulandı" }
+            $lvi.SubItems.Add($state) | Out-Null
+            $lvi.Tag = $e
+            if ($e.Reverted -or -not $e.Undoable) { $lvi.ForeColor = $Theme.TextMuted }
+            if ($e.Note) { $lvi.ToolTipText = $e.Note }
+            $lv.Items.Add($lvi) | Out-Null
+        }
+        if ($entries.Count -eq 0) {
+            $lvi = New-Object System.Windows.Forms.ListViewItem("-")
+            $lvi.SubItems.Add("") | Out-Null
+            $lvi.SubItems.Add("Henüz kayıtlı bir ayar değişikliği yok (kurulum sihirbazı modülleri çalıştığında burada listelenir).") | Out-Null
+            $lvi.ForeColor = $Theme.TextMuted
+            $lv.Items.Add($lvi) | Out-Null
+        }
+    }
+    $lv.ShowItemToolTips = $true
+    $lv.Add_ItemCheck({
+        param($s, $ev)
+        # Reverted / not-undoable rows cannot be selected
+        $item = $s.Items[$ev.Index]
+        if (-not $item.Tag -or $item.Tag.Reverted -or -not $item.Tag.Undoable) { $ev.NewValue = [System.Windows.Forms.CheckState]::Unchecked }
+    })
+
+    $btnAll.Add_Click({ foreach ($i in $lv.Items) { $i.Checked = $true } })
+    $btnClose.Add_Click({ $dlg.Close() })
+    $btnUndo.Add_Click({
+        $ids = @($lv.Items | Where-Object { $_.Checked -and $_.Tag } | ForEach-Object { $_.Tag.Id })
+        if ($ids.Count -eq 0) { return }
+        $ok = [System.Windows.Forms.MessageBox]::Show("$($ids.Count) ayar önceki değerine döndürülecek. Devam edilsin mi?", "Geri Al",
+                  [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($ok -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        $dlg.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+        try {
+            foreach ($r in @(Undo-ChangeJournal -Ids $ids)) {
+                $tag = if ($r.Success) { "[SUCCESS]" } else { "[ERROR]" }
+                $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] $tag $($r.Message)`r`n")
+            }
+        } finally {
+            $dlg.Cursor = [System.Windows.Forms.Cursors]::Default
+        }
+        & $fill
+    })
+
+    # Dock order: Fill control front-most (AGENTS.md pitfall 7)
+    $dlg.Controls.Add($lblInfo)
+    $dlg.Controls.Add($pnlBtns)
+    $dlg.Controls.Add($lv)
+    $lv.BringToFront()
+    & $fill
+    [void]$dlg.ShowDialog($form)
+    $dlg.Dispose()
+}
+
+$btnJournal = New-SchedButton "↩️ Değişiklikleri Geri Al" 180 $Theme.AccentAmber
+$btnJournal.ForeColor = [System.Drawing.Color]::Black
+$btnJournal.Add_Click({
+    try { Show-ChangeJournalDialog }
+    catch { $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Değişiklik listesi açılamadı: $($_.Exception.Message)`r`n") }
+})
+$flpSchedBtns.Width += 186
+$flpSchedBtns.Controls.Add($btnJournal)
 
 # Action Buttons Table Layout
 $tlpMaintActions = New-Object System.Windows.Forms.TableLayoutPanel
