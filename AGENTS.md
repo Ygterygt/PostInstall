@@ -60,6 +60,7 @@ PostInstall.exe (Program.cs)        UAC ile yükseltir, konsolsuz powershell.exe
 | `Tools\Build-Launcher.ps1` | `Program.cs` → `PostInstall.exe` (Windows'taki `csc.exe` ile) |
 | `Tools\Enforce-Encoding.ps1` | Tüm `.ps1/.json` dosyalarını UTF-8 **BOM'lu** yapar |
 | `Test-PostInstallSuite.ps1` | Test bataryası (aşağıya bakın) |
+| `dev\New-TestVM.ps1`, `dev\Copy-SuiteToVM.ps1` | Geliştirici araçları (pakete girmez): Windows 11 uyumlu Hyper-V test VM'i oluşturur, paketi VM'e kopyalar |
 | `Installers\` | Çevrimdışı kurulum dosyaları (git'e girmez). Modül 10 hepsini sessiz kurar; aynı/yeni sürüm kuruluysa atlar, **eski kuruluysa günceller**. GPU sürücü güncellemeleri de buradan yapılır (NVIDIA: `-s -noreboot`, AMD Adrenalin: `-install`) |
 
 ## 4. Çalışma zamanı dosyaları
@@ -73,7 +74,7 @@ Hepsi `%ProgramData%\ComputerMaintenancePro\` altındadır (repo içinde **deği
 | `State\PostInstall_State.json` | Motor state'i (oturum, adım sonuçları, seçili adımlar) |
 | `State\OfflineSelection.json` | Sihirbaz sayfa 3'te seçilen yükleyiciler (modül 10 okur) |
 | `State\UI.pid` | Tek örnek kilidini tutan UI sürecinin PID'i |
-| `State\ChangeJournal.json` | Modüllerin değiştirdiği ayarlar + önceki değerleri (geri alma için; test için ``) |
+| `State\ChangeJournal.json` | Modüllerin değiştirdiği ayarlar + önceki değerleri (geri alma için; testlerde `$env:CMP_CHANGE_JOURNAL` ile yönlendirilir) |
 | `State\ScheduledMaintenance.json` | Zamanlanmış bakım için kullanıcı seçimleri (repo'daki `config.json` değiştirilmez) |
 | `Backups\`, `Reports\`, `EventLogArchive\` | Registry/ortam/DNS/sürücü yedekleri, raporlar, arşivlenen olay günlükleri |
 
