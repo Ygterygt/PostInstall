@@ -75,7 +75,7 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-14 | 🟠 | Motor: modül çıktısı adım bitince toplu geliyor, `AllowRebootIfTriggered`/`MaxRetriesPerStep`/adım zaman aşımı yok sayılıyor, zaman aşımında alt süreçler öksüz kalıyor, Türkçe karakter bozuluyor | Canlı akış (UTF-8), ertelenmiş reboot, retry, süreç ağacı sonlandırma | ✅ Done |
 | CMP-15 | 🟢 | Dizüstünde de Yüksek Performans planı aktif ediliyor (pil) | Laptop → Dengeli, masaüstü → Yüksek Perf (varsa) | ✅ Done |
 | CMP-16 | 🔵 | Test bataryası gerçek sistemde temp siliyor, sabit yol kullanıyor, çıkış kodu vermiyor; `TestResults.json`/`Backups` git'te; exe için build script yok | Sandbox testler, birim testler, `.gitignore`, `Tools\Build-Launcher.ps1` | ✅ Done |
-| CMP-17 | 🔵 | CI yok | GitHub Actions: PSScriptAnalyzer + test bataryası (windows-latest) | 🔎 Review/Test |
+| CMP-17 | 🔵 | CI yok | GitHub Actions: PSScriptAnalyzer + test bataryası (windows-latest) | ✅ Done |
 
 ### 🐞 Çalışma sırasında keşfedilen kartlar (Sprint 1–2)
 
@@ -99,14 +99,14 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-25 | Her tweak için geri alma (undo) ve "önceki değer" kaydı | Win11Debloat, Sophia |
 | CMP-26 | ASR kuralları (audit modu), Defender PUA koruması | Harden-Windows-Security |
 | CMP-27 | Telemetri geçmişi (CSV) + raporda trend grafikleri, sağlık skoru | UniGetUI / LHM |
-| CMP-28 | Güncellenebilir uygulamalar sekmesi (`winget upgrade` listesi, toplu güncelle) | UniGetUI |
+| CMP-28 | ✅ **Done (Sprint 3)** — Güncellemeler sekmesi: `winget upgrade` tablosu sütun konumuna göre ayrıştırılır (dil bağımsız), seçili uygulamalar sırayla güncellenir, `config.Updates.ExcludeIds` ile hariç tutma | UniGetUI |
 | CMP-29 | `PostInstallUI.ps1` (1700 satır) sekme başına dosyalara bölünsün | — |
 | CMP-30 | TR/EN yerelleştirme kaynak dosyası | Sophia |
 | CMP-31 | Betik ve exe için kod imzalama | PSADT |
 
 ## 4. Sprint 1–2 Teslim Özeti (2026-09-27)
 
-- 19 kart **Done**, 1 kart **Review/Test** (CMP-17: CI dosyası hazır, GitHub'a push sonrası ilk koşuda doğrulanacak).
+- 20 kart **Done** (CMP-17: CI GitHub'da yeşil; ilk koşular PSScriptAnalyzer'ın bir yanlış alarmı yüzünden düşüyordu, düzeltildi).
 - Test bataryası: **47/47 PASS** (Windows PowerShell 5.1). Yeni kapsam: birim testleri, temp temizliği sandbox'ı, motorun uçtan uca testi (retry, atlama, ertelenmiş reboot, watchdog, UTF-8, resume, dot-source regresyonu).
 - Davranış değişiklikleri (config ile geri alınabilir): log/state `%ProgramData%\ComputerMaintenancePro`'ya taşındı · Geri Dönüşüm Kutusu varsayılan olarak boşaltılmaz · `DismResetBase` varsayılanı `false` · `MaxRetriesPerStep` 1 · dizüstünde Dengeli güç planı · DNS yalnızca DHCP adaptörlerinde ve domain dışı makinelerde değişir.
 

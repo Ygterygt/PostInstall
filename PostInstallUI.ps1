@@ -12,7 +12,9 @@
 [CmdletBinding()]
 param(
     [switch]$Resume,
-    [switch]$Auto
+    [switch]$Auto,
+    [ValidateSet("Monitoring", "Maintenance", "Wizard", "GpuCenter", "Updates", "Console")]
+    [string]$StartTab = "Monitoring"
 )
 
 Set-StrictMode -Off
@@ -133,6 +135,7 @@ $Script:DriverEnginePath = Join-Path $Script:UIRoot "Tools\DriverEngine.ps1"
 $Script:PackageEnginePath = Join-Path $Script:UIRoot "Tools\PackageEngine.ps1"
 $Script:MaintEnginePath = Join-Path $Script:UIRoot "Tools\MaintenanceEngine.ps1"
 $Script:HwMonEnginePath = Join-Path $Script:UIRoot "Tools\HardwareMonitorEngine.ps1"
+$Script:UpdateEnginePath = Join-Path $Script:UIRoot "Tools\UpdateEngine.ps1"
 $Script:GpuDbPath       = Join-Path $Script:UIRoot "gpu_compatibility.json"
 
 if (-not (Test-Path $Script:EnginePath)) {
@@ -275,7 +278,7 @@ function Stop-ScriptBlockAsync {
 $form = New-Object System.Windows.Forms.Form
 $form.Text            = "Computer Maintenance Pro - Enterprise System Care & Staging Suite v$($Script:Config.Version)"
 $form.Size            = New-Object System.Drawing.Size(1160, 760)
-$form.MinimumSize     = New-Object System.Drawing.Size(1024, 680)
+$form.MinimumSize     = New-Object System.Drawing.Size(1060, 680)
 $form.StartPosition   = [System.Windows.Forms.FormStartPosition]::CenterScreen
 $form.BackColor       = $Theme.BgMain
 $form.ForeColor       = $Theme.TextPrimary
@@ -358,9 +361,10 @@ $btnTabMon     = New-TabNavBtn "📊 Canlı İzleme"       "Monitoring"   16  15
 $btnTabMaint   = New-TabNavBtn "🛠️ Sistem Bakımı"      "Maintenance"  172 160
 $btnTabWizard  = New-TabNavBtn "🚀 Kurulum Sihirbazı"  "Wizard"       338 170
 $btnTabGpu     = New-TabNavBtn "🎮 GPU & Sürücüler"    "GpuCenter"    514 170
-$btnTabConsole = New-TabNavBtn "📜 Konsol & Loglar"    "Console"      690 160
+$btnTabUpd     = New-TabNavBtn "🔄 Güncellemeler"      "Updates"      690 160
+$btnTabConsole = New-TabNavBtn "📜 Konsol & Loglar"    "Console"      856 160
 
-$Script:NavTabButtons = @($btnTabMon, $btnTabMaint, $btnTabWizard, $btnTabGpu, $btnTabConsole)
+$Script:NavTabButtons = @($btnTabMon, $btnTabMaint, $btnTabWizard, $btnTabGpu, $btnTabUpd, $btnTabConsole)
 foreach ($btn in $Script:NavTabButtons) { $pnlNavTabs.Controls.Add($btn) }
 #endregion
 
@@ -1063,6 +1067,211 @@ $flpGpuCards.BringToFront()
 #endregion
 
 # -------------------------------------------------------------------------------------------------
+# TAB 6: APPLICATION UPDATES (winget upgrade)
+# -------------------------------------------------------------------------------------------------
+#region --- Tab 6: Updates ---
+$Script:UpdQueue       = New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]'
+$Script:UpdatesRunning = $false
+$Script:UpdatesLoaded  = $false
+
+$pnlTabUpdates = New-Object System.Windows.Forms.Panel
+$pnlTabUpdates.Dock      = [System.Windows.Forms.DockStyle]::Fill
+$pnlTabUpdates.BackColor = $Theme.BgMain
+$pnlTabUpdates.Padding   = New-Object System.Windows.Forms.Padding(16, 12, 16, 12)
+$pnlContent.Controls.Add($pnlTabUpdates)
+
+$pnlUpdBar = New-Object System.Windows.Forms.Panel
+$pnlUpdBar.Dock      = [System.Windows.Forms.DockStyle]::Top
+$pnlUpdBar.Height    = 40
+$pnlUpdBar.BackColor = $Theme.BgMain
+
+$lblUpdHdr = New-Object System.Windows.Forms.Label
+$lblUpdHdr.Text        = "🔄 Uygulama Güncellemeleri (WinGet)"
+$lblUpdHdr.Font        = $Theme.FontHeader
+$lblUpdHdr.ForeColor   = $Theme.AccentCyan
+$lblUpdHdr.Dock        = [System.Windows.Forms.DockStyle]::Fill
+$lblUpdHdr.TextAlign   = [System.Drawing.ContentAlignment]::MiddleLeft
+$lblUpdHdr.UseMnemonic = $false
+
+$flpUpdActions = New-Object System.Windows.Forms.FlowLayoutPanel
+$flpUpdActions.Dock          = [System.Windows.Forms.DockStyle]::Right
+$flpUpdActions.Width         = 560
+$flpUpdActions.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+$flpUpdActions.BackColor     = [System.Drawing.Color]::Transparent
+
+function New-UpdBarButton {
+    param([string]$Text, [int]$Width, [System.Drawing.Color]$Bg, [System.Drawing.Color]$Fg)
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text      = $Text
+    $b.Font      = $Theme.FontButton
+    $b.Size      = New-Object System.Drawing.Size($Width, 30)
+    $b.BackColor = $Bg
+    $b.ForeColor = $Fg
+    $b.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $b.FlatAppearance.BorderColor = $Theme.Border
+    $b.Cursor    = [System.Windows.Forms.Cursors]::Hand
+    return $b
+}
+$btnUpdApply   = New-UpdBarButton "⬆️ Seçilileri Güncelle" 170 $Theme.AccentGreen ([System.Drawing.Color]::White)
+$btnUpdScan    = New-UpdBarButton "🔍 Tara"               100 $Theme.AccentBlue  ([System.Drawing.Color]::White)
+$btnUpdNone    = New-UpdBarButton "Temizle"                90 $Theme.BgInput     $Theme.TextPrimary
+$btnUpdAll     = New-UpdBarButton "Tümünü Seç"            100 $Theme.BgInput     $Theme.TextPrimary
+foreach ($b in @($btnUpdApply, $btnUpdScan, $btnUpdNone, $btnUpdAll)) { $flpUpdActions.Controls.Add($b) }
+
+$pnlUpdBar.Controls.Add($lblUpdHdr)
+$pnlUpdBar.Controls.Add($flpUpdActions)
+
+$lstUpdates = New-Object System.Windows.Forms.ListView
+$lstUpdates.Dock          = [System.Windows.Forms.DockStyle]::Fill
+$lstUpdates.BackColor     = $Theme.BgCard
+$lstUpdates.ForeColor     = $Theme.TextPrimary
+$lstUpdates.Font          = $Theme.FontSub
+$lstUpdates.View          = [System.Windows.Forms.View]::Details
+$lstUpdates.FullRowSelect = $true
+$lstUpdates.CheckBoxes    = $true
+$lstUpdates.BorderStyle   = [System.Windows.Forms.BorderStyle]::None
+$lstUpdates.Columns.Add("Uygulama", 300) | Out-Null
+$lstUpdates.Columns.Add("Kimlik", 230) | Out-Null
+$lstUpdates.Columns.Add("Kurulu", 130) | Out-Null
+$lstUpdates.Columns.Add("Yeni", 130) | Out-Null
+$lstUpdates.Columns.Add("Kaynak", 70) | Out-Null
+$lstUpdates.Columns.Add("Durum", 140) | Out-Null
+
+$rtbUpdLog = New-Object System.Windows.Forms.RichTextBox
+$rtbUpdLog.Dock        = [System.Windows.Forms.DockStyle]::Bottom
+$rtbUpdLog.Height      = 140
+$rtbUpdLog.BackColor   = $Theme.BgConsole
+$rtbUpdLog.ForeColor   = $Theme.TextPrimary
+$rtbUpdLog.Font        = $Theme.FontMono
+$rtbUpdLog.BorderStyle = [System.Windows.Forms.BorderStyle]::None
+$rtbUpdLog.ReadOnly    = $true
+
+# Dock order: Fill must be front-most (see AGENTS.md, pitfall 7)
+$pnlTabUpdates.Controls.Add($pnlUpdBar)
+$pnlTabUpdates.Controls.Add($rtbUpdLog)
+$pnlTabUpdates.Controls.Add($lstUpdates)
+$lstUpdates.BringToFront()
+
+function Write-UpdLog {
+    param([string]$Message)
+    $line = "[$((Get-Date).ToString('HH:mm:ss'))] $Message"
+    $rtbUpdLog.SelectionStart  = $rtbUpdLog.TextLength
+    $rtbUpdLog.SelectionLength = 0
+    $rtbUpdLog.SelectionColor  = if ($Message -match "\[SUCCESS\]") { $Theme.AccentGreen }
+                                 elseif ($Message -match "\[WARN\]") { $Theme.AccentAmber }
+                                 elseif ($Message -match "\[ERROR\]") { $Theme.AccentRed }
+                                 else { $Theme.TextPrimary }
+    $rtbUpdLog.AppendText("$line`r`n")
+    $rtbUpdLog.ScrollToCaret()
+    $rtbUnifiedConsole.AppendText("$line [UPD] $Message`r`n")
+}
+
+function Set-UpdatesBusy {
+    param([bool]$Busy)
+    $Script:UpdatesRunning = $Busy
+    foreach ($b in @($btnUpdApply, $btnUpdScan, $btnUpdAll, $btnUpdNone)) { $b.Enabled = -not $Busy }
+}
+
+function Get-UpdateExcludeIds {
+    try {
+        if ($Script:Config.Updates -and $Script:Config.Updates.ExcludeIds) { return @($Script:Config.Updates.ExcludeIds) }
+    } catch {}
+    return @()
+}
+
+function Start-UpdateScan {
+    if ($Script:UpdatesRunning) { return }
+    Set-UpdatesBusy $true
+    $lstUpdates.Items.Clear()
+    Write-UpdLog "Güncellemeler taranıyor (winget upgrade)..."
+    Start-ScriptBlockAsync -Track -ScriptBlock {
+        param($enginePath, $q, $exclude)
+        try {
+            . $enginePath
+            $items = @(Get-AvailableAppUpdates -ExcludeIds $exclude)
+            $q.Enqueue([PSCustomObject]@{ Type = "ScanResult"; Items = $items })
+        } catch {
+            $q.Enqueue([PSCustomObject]@{ Type = "Log"; Text = "[ERROR] Tarama hatası: $($_.Exception.Message)" })
+            $q.Enqueue([PSCustomObject]@{ Type = "ScanResult"; Items = @() })
+        }
+    } -ArgumentList @($Script:UpdateEnginePath, $Script:UpdQueue, (Get-UpdateExcludeIds)) | Out-Null
+}
+
+function Start-UpdateApply {
+    if ($Script:UpdatesRunning) { return }
+    $targets = @($lstUpdates.Items | Where-Object { $_.Checked -and $_.Tag } | ForEach-Object { $_.Tag })
+    if ($targets.Count -eq 0) {
+        Write-UpdLog "[WARN] Güncellenecek uygulama seçilmedi."
+        return
+    }
+    Set-UpdatesBusy $true
+    Write-UpdLog "$($targets.Count) uygulama sırayla güncellenecek..."
+    Start-ScriptBlockAsync -Track -ScriptBlock {
+        param($enginePath, $q, $targets)
+        . $enginePath
+        foreach ($t in $targets) {
+            $q.Enqueue([PSCustomObject]@{ Type = "Status"; Id = $t.Id; Text = "Güncelleniyor..."; Level = "Running" })
+            try {
+                $r = Update-AppPackage -Id $t.Id -Source $t.Source
+                $level = if ($r.Success) { "Success" } else { "Failed" }
+                $text  = if ($r.RebootRequired) { "Tamam (reboot gerekli)" } elseif ($r.Success) { "Güncellendi" } else { "Hata ($($r.ExitCode))" }
+                $q.Enqueue([PSCustomObject]@{ Type = "Status"; Id = $t.Id; Text = $text; Level = $level })
+                $tag = if ($r.Success) { "[SUCCESS]" } else { "[ERROR]" }
+                $q.Enqueue([PSCustomObject]@{ Type = "Log"; Text = "$tag $($t.Name): $($r.Details)" })
+            } catch {
+                $q.Enqueue([PSCustomObject]@{ Type = "Status"; Id = $t.Id; Text = "Hata"; Level = "Failed" })
+                $q.Enqueue([PSCustomObject]@{ Type = "Log"; Text = "[ERROR] $($t.Name): $($_.Exception.Message)" })
+            }
+        }
+        $q.Enqueue([PSCustomObject]@{ Type = "ApplyDone" })
+    } -ArgumentList @($Script:UpdateEnginePath, $Script:UpdQueue, $targets) | Out-Null
+}
+
+function Receive-UpdateMessages {
+    $m = $null
+    while ($Script:UpdQueue.TryDequeue([ref]$m)) {
+        switch ($m.Type) {
+            "Log" { Write-UpdLog $m.Text }
+            "ScanResult" {
+                $lstUpdates.Items.Clear()
+                foreach ($it in @($m.Items)) {
+                    $lvi = New-Object System.Windows.Forms.ListViewItem($it.Name)
+                    foreach ($v in @($it.Id, $it.Version, $it.Available, $it.Source)) { $lvi.SubItems.Add([string]$v) | Out-Null }
+                    $lvi.SubItems.Add($(if ($it.Excluded) { "Hariç (config)" } else { "Güncelleme var" })) | Out-Null
+                    $lvi.Tag     = $it
+                    $lvi.Checked = -not $it.Excluded
+                    if ($it.Excluded) { $lvi.ForeColor = $Theme.TextMuted }
+                    $lstUpdates.Items.Add($lvi) | Out-Null
+                }
+                $count = @($m.Items).Count
+                $lblUpdHdr.Text = "🔄 Uygulama Güncellemeleri (WinGet) — $count güncelleme"
+                Write-UpdLog $(if ($count -eq 0) { "[SUCCESS] Tüm uygulamalar güncel." } else { "$count uygulama için güncelleme bulundu." })
+                Set-UpdatesBusy $false
+            }
+            "Status" {
+                foreach ($lvi in $lstUpdates.Items) {
+                    if ($lvi.Tag -and $lvi.Tag.Id -eq $m.Id) {
+                        $lvi.SubItems[5].Text = $m.Text
+                        $lvi.ForeColor = switch ($m.Level) { "Running" { $Theme.AccentCyan } "Success" { $Theme.AccentGreen } default { $Theme.AccentRed } }
+                    }
+                }
+            }
+            "ApplyDone" {
+                Write-UpdLog "Güncelleme turu tamamlandı. Liste yenileniyor..."
+                Set-UpdatesBusy $false
+                Start-UpdateScan
+            }
+        }
+    }
+}
+
+$btnUpdScan.Add_Click({ Start-UpdateScan })
+$btnUpdApply.Add_Click({ Start-UpdateApply })
+$btnUpdAll.Add_Click({ foreach ($lvi in $lstUpdates.Items) { if ($lvi.Tag -and -not $lvi.Tag.Excluded) { $lvi.Checked = $true } } })
+$btnUpdNone.Add_Click({ foreach ($lvi in $lstUpdates.Items) { $lvi.Checked = $false } })
+#endregion
+
+# -------------------------------------------------------------------------------------------------
 # TAB 5: UNIFIED CONSOLE & LOGS
 # -------------------------------------------------------------------------------------------------
 #region --- Tab 5: Unified Console ---
@@ -1144,6 +1353,7 @@ function Switch-AppTab {
     $pnlTabMaint.Visible   = ($TabName -eq "Maintenance")
     $pnlTabWizard.Visible  = ($TabName -eq "Wizard")
     $pnlTabGpu.Visible     = ($TabName -eq "GpuCenter")
+    $pnlTabUpdates.Visible = ($TabName -eq "Updates")
     $pnlTabConsole.Visible = ($TabName -eq "Console")
 
     switch ($TabName) {
@@ -1156,6 +1366,11 @@ function Switch-AppTab {
                 $Script:GpuCardsLoaded = $true
                 try { Update-GpuCenterCard } catch { Write-GpuLog "[ERROR] GPU kartları yüklenemedi: $($_.Exception.Message)" }
             }
+        }
+        "Updates"     {
+            $pnlTabUpdates.BringToFront()
+            # First visit triggers a scan (winget takes a few seconds, never at startup)
+            if (-not $Script:UpdatesLoaded) { $Script:UpdatesLoaded = $true; Start-UpdateScan }
         }
         "Console"     { $pnlTabConsole.BringToFront() }
     }
@@ -1178,6 +1393,7 @@ $btnTabMon.Add_Click({ Switch-AppTab -TabName "Monitoring" })
 $btnTabMaint.Add_Click({ Switch-AppTab -TabName "Maintenance" })
 $btnTabWizard.Add_Click({ Switch-AppTab -TabName "Wizard" })
 $btnTabGpu.Add_Click({ Switch-AppTab -TabName "GpuCenter" })
+$btnTabUpd.Add_Click({ Switch-AppTab -TabName "Updates" })
 $btnTabConsole.Add_Click({ Switch-AppTab -TabName "Console" })
 
 function Set-WizardPage {
@@ -1691,6 +1907,9 @@ $uiTimer.Add_Tick({
         Write-GpuLog $gMsg
     }
 
+    # 2c. Application updates tab
+    Receive-UpdateMessages
+
     # 2. Maintenance Log Queue
     $mMsg = ""
     while ($Script:MaintMsgQueue.TryDequeue([ref]$mMsg)) {
@@ -1930,6 +2149,13 @@ $btnClose.Add_Click({
 
 $form.Add_FormClosing({
     param($formObj, $closeEvent)
+    if ($Script:UpdatesRunning -and -not $Script:IsRunning) {
+        $r = [System.Windows.Forms.MessageBox]::Show("Uygulama güncellemesi / taraması devam ediyor. Kapatırsanız yarım kalan güncelleme tamamlanana kadar arka planda beklenir. Yine de kapatılsın mı?", "Uyarı", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($r -eq [System.Windows.Forms.DialogResult]::No) {
+            $closeEvent.Cancel = $true
+            return
+        }
+    }
     if ($Script:IsRunning) {
         $r = [System.Windows.Forms.MessageBox]::Show("Kurulum süreci devam ediyor. Kapatmak istediğinizden emin misiniz?", "Uyarı", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
         if ($r -eq [System.Windows.Forms.DialogResult]::No) {
@@ -1985,8 +2211,8 @@ if ($Resume -or $Auto) {
         Start-InstallationProcess -Resume:$Resume
     })
 } else {
-    Switch-AppTab -TabName "Monitoring"
     Set-WizardPage 1
+    $form.Add_Shown({ Switch-AppTab -TabName $StartTab })
 }
 
 $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
