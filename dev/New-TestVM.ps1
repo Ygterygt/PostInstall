@@ -56,7 +56,10 @@ $dvd = Add-VMDvdDrive -VMName $VmName -Path $IsoPath -Passthru
 Set-VMFirmware -VMName $VmName -FirstBootDevice $dvd
 
 # Copy-VMFile needs Guest Services; Standard checkpoints capture memory (exact "before test" state)
-Enable-VMIntegrationService -VMName $VmName -Name "Guest Service Interface"
+# Service names are localized ("Konuk Hizmeti Arabirimi" on Turkish Windows): match by the fixed component id
+Get-VMIntegrationService -VMName $VmName |
+    Where-Object { $_.Id -like "*6C09BB55-D683-4DA0-8931-C9BF705F6480" } |
+    Enable-VMIntegrationService
 Set-VM -Name $VmName -CheckpointType Standard -AutomaticCheckpointsEnabled $false -EnhancedSessionTransportType HvSocket
 
 Write-Host "[SUCCESS] '$VmName' hazir." -ForegroundColor Green
