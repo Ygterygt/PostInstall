@@ -334,6 +334,7 @@ function New-TabNavBtn {
     param([string]$Text, [string]$TabKey, [int]$X, [int]$W)
     $btn = New-Object System.Windows.Forms.Button
     $btn.Text      = $Text
+    $btn.UseMnemonic = $false   # "GPU & Sürücüler": '&' would otherwise become an access-key underline
     $btn.Tag       = $TabKey
     $btn.Font      = $Theme.FontTab
     $btn.Location  = New-Object System.Drawing.Point($X, 4)
@@ -939,6 +940,7 @@ $pnlWizardBottom.Dock      = [System.Windows.Forms.DockStyle]::Bottom
 $pnlWizardBottom.Height    = 52
 $pnlWizardBottom.BackColor = $Theme.BgHeader
 $pnlTabWizard.Controls.Add($pnlWizardBottom)
+$pnlWizardPages.BringToFront()   # Fill must be front-most, or the breadcrumb bar hides page titles (AGENTS.md pitfall 7)
 
 $pnlWizardBtns = New-Object System.Windows.Forms.Panel
 $pnlWizardBtns.Dock      = [System.Windows.Forms.DockStyle]::Right
@@ -1025,7 +1027,7 @@ $tlpPage1.Controls.Add($tlpSpecsGrid, 0, 1)
 function New-SpecBox {
     param([string]$Hdr)
     $box = New-Object System.Windows.Forms.GroupBox
-    $box.Text      = $Hdr
+    $box.Text      = $Hdr.Replace("&", "&&")   # GroupBox has no UseMnemonic: escape '&' ("Anakart & BIOS")
     $box.Font      = $Theme.FontCardHdr
     $box.ForeColor = $Theme.AccentCyan
     $box.BackColor = $Theme.BgCard
