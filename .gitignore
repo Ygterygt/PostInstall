@@ -22,3 +22,6 @@ State/
 
 # Test outputs (regenerated on every run)
 TestResults.json
+
+# Release packages (Tools\New-ReleasePackage.ps1)
+dist/

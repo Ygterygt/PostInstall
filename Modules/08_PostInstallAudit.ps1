@@ -205,16 +205,12 @@ if (-not (Test-Path $summaryDir)) { New-Item -Path $summaryDir -ItemType Directo
 [System.IO.File]::WriteAllText($summaryPath, $reportContent, $reportEncoding)
 Write-Output "[SUCCESS] Ozet rapor olusturuldu: $summaryPath"
 
-# Sync to Docs directory from config or fallback
+# Optional copy to a user-chosen folder (config.DocsSyncPath); empty = disabled, so nothing is created on the desktop
 $docsDir = $cfg.DocsSyncPath
-if (-not $docsDir) {
-    $docsDir = Join-Path $env:USERPROFILE "Desktop\Antigravity\Docs"
-}
-
-if (-not (Test-Path $docsDir)) {
+if ($docsDir -and -not (Test-Path $docsDir)) {
     try { New-Item -Path $docsDir -ItemType Directory -Force | Out-Null } catch {}
 }
-if (Test-Path $docsDir) {
+if ($docsDir -and (Test-Path $docsDir)) {
     $docsReport = Join-Path $docsDir "PostInstall_Audit.md"
     [System.IO.File]::WriteAllText($docsReport, $reportContent, $reportEncoding)
     Write-Output "[SUCCESS] Rapor Docs klasorune senkronize edildi: $docsReport"

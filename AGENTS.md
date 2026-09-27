@@ -57,7 +57,9 @@ PostInstall.exe (Program.cs)        UAC ile yükseltir, konsolsuz powershell.exe
 | `Tools\HardwareMonitorEngine.ps1` | Telemetri örneği (`Get-LiveTelemetrySample`) |
 | `Tools\SilentDetector.ps1` | Yükleyici türü + sessiz parametre tespiti, "zaten kurulu mu" kontrolü |
 | `Tools\SnapshotEngine.ps1`, `DriverEngine.ps1`, `ReportingEngine.ps1`, `SystemSpecsCollector.ps1` | Geri yükleme noktası, `Drivers\` klasöründen çevrimdışı INF enjeksiyonu (modül 05), HTML rapor, donanım profili |
-| `Tools\Build-Launcher.ps1` | `Program.cs` → `PostInstall.exe` (Windows'taki `csc.exe` ile) |
+| `Tools\Build-Launcher.ps1` | `Program.cs` → `PostInstall.exe` (Windows'taki `csc.exe` ile; sürüm `config.json`'dan exe'ye işlenir) |
+| `Tools\New-ReleasePackage.ps1` | Son kullanıcı zip'i + SHA256 (`dist\`). **İzin listesiyle** çalışır: pakete girecek yeni dosya/klasör buraya eklenmelidir |
+| `CHANGELOG.md`, `docs\KULLANIM.md` | Sürüm notları (release notları buradan alınır) ve pakete giren son kullanıcı kılavuzu |
 | `Tools\Enforce-Encoding.ps1` | Tüm `.ps1/.json` dosyalarını UTF-8 **BOM'lu** yapar |
 | `Test-PostInstallSuite.ps1` | Test bataryası (aşağıya bakın) |
 | `dev\New-TestVM.ps1`, `dev\Copy-SuiteToVM.ps1` | Geliştirici araçları (pakete girmez): Windows 11 uyumlu Hyper-V test VM'i oluşturur, paketi VM'e kopyalar |
@@ -94,6 +96,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-Launcher.ps1
 - Test bataryası **sistemi değiştirmez**: yazan/silen her test `%TEMP%` altında sandbox kullanır.
   Motorun uçtan uca testi sahte modüllerle retry, atlama, ertelenmiş reboot, zaman aşımı, UTF-8 ve resume'u doğrular.
 - CI: `.github/workflows/ci.yml` (windows-latest) — PSScriptAnalyzer (`PSScriptAnalyzerSettings.psd1`) + test bataryası.
+- **Sürüm çıkarma:** `config.json` → `Version`'ı artırın, `CHANGELOG.md`'ye aynı sürümün bölümünü ekleyin (test bunu denetler),
+  main'e birleştirin, sonra `git tag v4.2.0 && git push origin v4.2.0`. `release.yml` testleri çalıştırır, zip'i üretir ve
+  GitHub Release yayınlar. Etiket config sürümüyle uyuşmazsa paketleme durur; `v4.2.0-beta.1` gibi etiketler ön sürüm olur.
 - **Modülleri gerçek sistemde çalıştırmak sistem değişikliği yapar** (kurulum, registry, DNS…). Salt okunur olanlar:
   `02_StorageAndDisks` (TRIM hariç), `05_HardwareAndDrivers` (Drivers klasörü yoksa), `08_PostInstallAudit` (rapor yazar).
 - UI değişikliklerinde: arayüzü açıp kapatın, `UI_Startup.log`'da "Pencere gosterildi" satırını ve kapanışta hata
