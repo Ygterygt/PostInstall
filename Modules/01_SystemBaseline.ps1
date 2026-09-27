@@ -21,26 +21,32 @@ Write-Output "[INFO] 01_SystemBaseline: Sistem temel yapilandirmasi baslatiliyor
 #region === 1. POWER PLAN & SLEEP TIMEOUTS (ADAPTIVE: LAPTOP vs DESKTOP) ===
 Write-Output "[INFO] Guvenli ve Uyarlanabilir Guc Plani optimizasyonu..."
 try {
-    $battery = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
-    $isLaptop = [bool]$battery
-    $highPerfGuid = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
+    $battery   = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
+    $isLaptop  = [bool]$battery
+    $balanced  = "381b4222-f694-41f0-9685-ff5bb260df2e"
+    $highPerf  = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
+    $available = (powercfg /list 2>&1) -join "`n"
 
-    # Set High Performance on AC
-    powercfg /setactive $highPerfGuid 2>&1 | Out-Null
-    
     if ($isLaptop) {
-        # Laptop: Optimize both AC (plugged in) and DC (battery) to protect battery health
+        # Laptop: Balanced keeps turbo on AC but lets the CPU park on battery (High Performance drains it)
+        powercfg /setactive $balanced 2>&1 | Out-Null
         powercfg /change monitor-timeout-ac 20 2>&1 | Out-Null
         powercfg /change standby-timeout-ac 45 2>&1 | Out-Null
         powercfg /change monitor-timeout-dc 5 2>&1 | Out-Null
         powercfg /change standby-timeout-dc 15 2>&1 | Out-Null
-        Write-Output "[SUCCESS] Dizustu Bilgisayar algilandi: Prizde Yuksek Performans, bataryada dengeli enerji koruma profili uygulandi."
+        Write-Output "[SUCCESS] Dizustu Bilgisayar algilandi: 'Dengeli' plan + pil dostu uyku sureleri uygulandi."
     } else {
-        # Desktop / Workstation / VM: Full throttle, no sleep on AC
+        # Desktop / Workstation / VM: High Performance if the plan exists (Modern Standby systems only ship Balanced)
+        if ($available -match $highPerf) {
+            powercfg /setactive $highPerf 2>&1 | Out-Null
+            Write-Output "[SUCCESS] Masaustu / Is Istasyonu algilandi: 'Yuksek Performans' plani aktif."
+        } else {
+            Write-Output "[NOTE] Yuksek Performans plani bu sistemde yok (Modern Standby). Dengeli plan korunuyor."
+        }
         powercfg /change standby-timeout-ac 0 2>&1 | Out-Null
         powercfg /change monitor-timeout-ac 30 2>&1 | Out-Null
         powercfg /change hibernate-timeout-ac 0 2>&1 | Out-Null
-        Write-Output "[SUCCESS] Masaustu / Is Istasyonu algilandi: 'Yuksek Performans' (High Performance, kesintisiz calisma) uygulandi."
+        Write-Output "[SUCCESS] Prizde uyku devre disi, ekran 30 dk sonra kapanir."
     }
 } catch {
     Write-Output "[WARN] Guc plani degistirilirken uyari: $_"

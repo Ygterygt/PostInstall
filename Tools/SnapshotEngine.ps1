@@ -12,7 +12,7 @@
 function New-SystemSnapshot {
     param(
         [string]$Description = "Antigravity PostInstall Pre-Execution Snapshot",
-        [string]$BackupDir   = "C:\PostInstall\Backups"
+        [string]$BackupDir   = (Join-Path $env:ProgramData "ComputerMaintenancePro\Backups")
     )
 
     $result = @{
@@ -52,7 +52,7 @@ function New-SystemSnapshot {
 
             # Create Restore Point
             Write-Output "[INFO] Windows Sistem Geri Yukleme Noktasi (VSS Snapshot) olusturuluyor..."
-            $sr = Checkpoint-Computer -Description $Description -RestorePointType "APPLICATION_INSTALL" -ErrorAction Stop
+            Checkpoint-Computer -Description $Description -RestorePointType "APPLICATION_INSTALL" -ErrorAction Stop
             $result.RestorePointCreated = $true
             Write-Output "[SUCCESS] Sistem Geri Yukleme Noktasi basariyla olusturuldu: '$Description'"
         }
@@ -65,7 +65,6 @@ function New-SystemSnapshot {
     # 2. Export Critical Registry Settings (.reg & JSON backup)
     try {
         $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-        $regBackupFile = Join-Path $BackupDir "Registry_PreInstall_$timestamp.reg"
         $envBackupFile = Join-Path $BackupDir "Environment_PreInstall_$timestamp.json"
 
         # Backup System & User Environment variables to JSON
@@ -103,7 +102,7 @@ function New-SystemSnapshot {
 }
 
 function Restore-RegistrySnapshot {
-    param([string]$BackupDir = "C:\PostInstall\Backups")
+    param([string]$BackupDir = (Join-Path $env:ProgramData "ComputerMaintenancePro\Backups"))
 
     Write-Output "[INFO] Kayit Defteri ve Ortam Degiskenleri yedekten geri yukleniyor ($BackupDir)..."
     if (-not (Test-Path $BackupDir)) {

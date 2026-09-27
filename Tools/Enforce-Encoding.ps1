@@ -1,5 +1,5 @@
 ﻿#Requires -Version 5.1
-$targetDir = "C:\PostInstall"
+$targetDir = Split-Path -Parent $PSScriptRoot
 $utf8Bom = New-Object System.Text.UTF8Encoding($true)
 
 $files = Get-ChildItem -Path $targetDir -Include "*.ps1", "*.json" -Recurse | Where-Object { $_.FullName -notlike "*\.git*" }

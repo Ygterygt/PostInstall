@@ -4,16 +4,49 @@
     PackageEngine.ps1 - Smart Software Deployment & Lifecycle Engine
 .DESCRIPTION
     Provides high-reliability package installations with:
-      - Intelligent Pre-check: Scans Registry, AppX, and Binary PATH for existing versions
+      - Intelligent Pre-check: WinGet (exact id), Registry (word-boundary match), AppX and Binary PATH
       - Semantic Version Comparison: Automatically skips if installed version >= target version
       - 3-Tier Resilient Fallback:
-          Tier 1: WinGet (Silent, auto-accept agreements)
-          Tier 2: Direct Official CDN Download + Authenticode/Size verification
-          Tier 3: Local Offline Installer Cache (C:\PostInstall\Installers)
+          Tier 1: WinGet (Silent, auto-accept agreements, official return codes)
+          Tier 2: Direct Official CDN Download + mandatory Authenticode verification
+          Tier 3: Local Offline Installer Cache (<suite>\Installers)
 .NOTES
     Author : Antigravity Systems Team
-    Version: 4.0.0
+    Version: 4.1.0
+    WinGet return codes: https://github.com/microsoft/winget-cli/blob/master/doc/windows/package-manager/winget/returnCodes.md
 #>
+
+$Script:PackageEngineRoot = Split-Path -Parent $PSScriptRoot
+
+# Official WinGet return codes (decimal form of the 0x8A15xxxx HRESULTs)
+$Script:WingetCodes = @{
+    UpdateNotApplicable    = -1978335189  # 0x8A15002B No applicable update found
+    NoApplicationsFound    = -1978335212  # 0x8A150014 No packages found
+    NoApplicableInstaller  = -1978335216  # 0x8A150010 No applicable installer (e.g. scope mismatch)
+    PackageAlreadyInstalled= -1978335135  # 0x8A150061 Found at least one version installed
+    InstallAlreadyInstalled= -1978334963  # 0x8A15010D Another version already installed
+    RebootRequiredToFinish = -1978334967  # 0x8A150109 Restart to finish installation
+    RebootInitiated        = -1978334965  # 0x8A15010B PC will restart to finish installation
+}
+$Script:WingetSuccessCodes = @(0, $Script:WingetCodes.UpdateNotApplicable, $Script:WingetCodes.PackageAlreadyInstalled, $Script:WingetCodes.InstallAlreadyInstalled)
+$Script:WingetRebootCodes  = @(3010, 1641, $Script:WingetCodes.RebootRequiredToFinish, $Script:WingetCodes.RebootInitiated)
+
+function ConvertTo-VersionParts {
+    param([string]$Version)
+    $clean = ($Version -replace "[^\d.]", "").Trim(".")
+    $parts = @()
+    foreach ($seg in ($clean.Split(".") | Where-Object { $_ -ne "" })) {
+        $n = [long]0
+        if ([long]::TryParse($seg, [ref]$n)) { $parts += $n }
+    }
+    return ,$parts
+}
+
+function Write-PackageLog {
+    # Host stream keeps Install-ResilientPackage's return value clean; still reaches module stdout / engine log
+    param([string]$Message)
+    Write-Host $Message
+}
 
 function Compare-AppVersion {
     [CmdletBinding()]
@@ -26,11 +59,8 @@ function Compare-AppVersion {
         return 0
     }
 
-    $clean1 = ($InstalledVersion -replace "[^\d.]", "").Trim(".")
-    $clean2 = ($TargetVersion -replace "[^\d.]", "").Trim(".")
-
-    $p1 = $clean1.Split(".") | Where-Object { $_ -ne "" } | ForEach-Object { [int]$_ }
-    $p2 = $clean2.Split(".") | Where-Object { $_ -ne "" } | ForEach-Object { [int]$_ }
+    $p1 = ConvertTo-VersionParts $InstalledVersion
+    $p2 = ConvertTo-VersionParts $TargetVersion
 
     $maxLen = [Math]::Max($p1.Count, $p2.Count)
     for ($i = 0; $i -lt $maxLen; $i++) {
@@ -40,6 +70,65 @@ function Compare-AppVersion {
         if ($num1 -lt $num2) { return -1 }
     }
     return 0
+}
+
+function Test-AppNameMatch {
+    <#
+    .SYNOPSIS
+        Word-boundary aware DisplayName match: "Git" matches "Git" / "Git version 2.x"
+        but NOT "GitHub Desktop" or "Digital...". Patterns containing regex escapes are used as regex.
+    #>
+    param(
+        [string]$DisplayName,
+        [Parameter(Mandatory)][string]$Pattern
+    )
+    if ([string]::IsNullOrWhiteSpace($DisplayName)) { return $false }
+    $core = if ($Pattern -match '\\') { $Pattern } else { [regex]::Escape($Pattern) }
+    return ($DisplayName -match "(?<![\w])$core(?![\w])")
+}
+
+function Get-WingetExe {
+    $cmd = Get-Command "winget.exe" -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    # Elevated / SYSTEM sessions often lack the WindowsApps alias on PATH
+    $pkg = Get-ChildItem "$env:ProgramFiles\WindowsApps\Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe\winget.exe" -ErrorAction SilentlyContinue |
+           Sort-Object FullName -Descending | Select-Object -First 1
+    if ($pkg) { return $pkg.FullName }
+    return $null
+}
+
+function Test-WingetPackageInstalled {
+    param(
+        [Parameter(Mandatory)][string]$WingetId,
+        [string]$WingetSource = "winget"
+    )
+    $winget = Get-WingetExe
+    if (-not $winget) { return $null }   # unknown
+    try {
+        $null = & $winget list --id $WingetId --exact --source $WingetSource --accept-source-agreements --disable-interactivity 2>&1
+        if ($LASTEXITCODE -eq 0) { return $true }
+        if ($LASTEXITCODE -eq $Script:WingetCodes.NoApplicationsFound) { return $false }
+    } catch {}
+    return $null
+}
+
+function Get-AppxPackageFromRegistry {
+    <#
+    .SYNOPSIS
+        Finds a current-user AppX/MSIX package by reading the AppModel repository in the registry.
+    .NOTES
+        Deliberately avoids Get-AppxPackage: the Appx cmdlets block on WinRT async calls and can hang
+        an STA WinForms thread before its message loop runs (suspected cause of an elevated UI that
+        never showed its window). Key names are package full names: Name_Version_Arch_Resource_Publisher.
+    #>
+    param([Parameter(Mandatory)][string]$NamePattern)
+    $repo = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages"
+    $key = Get-ChildItem -Path $repo -ErrorAction SilentlyContinue |
+           Where-Object { ($_.PSChildName -split "_")[0] -like "*$NamePattern*" } |
+           Select-Object -First 1
+    if (-not $key) { return $null }
+    $parts = $key.PSChildName -split "_"
+    return [PSCustomObject]@{ Name = $parts[0]; Version = $parts[1]; FullName = $key.PSChildName }
 }
 
 function Get-InstalledAppInfo {
@@ -61,8 +150,8 @@ function Get-InstalledAppInfo {
     )
 
     $installed = Get-ItemProperty $regPaths -ErrorAction SilentlyContinue |
-                 Where-Object { $_.DisplayName -and ($_.DisplayName -like "*$searchPattern*" -or $_.DisplayName -match $searchPattern) } |
-                 Sort-Object DisplayVersion -Descending |
+                 Where-Object { Test-AppNameMatch -DisplayName $_.DisplayName -Pattern $searchPattern } |
+                 Sort-Object { ((ConvertTo-VersionParts ([string]$_.DisplayVersion)) | ForEach-Object { $_.ToString("D12") }) -join "." } -Descending |
                  Select-Object -First 1
 
     if ($installed) {
@@ -77,7 +166,7 @@ function Get-InstalledAppInfo {
 
     # 2. Check Binary / Executable in PATH
     if ($BinaryName) {
-        $cmd = Get-Command $BinaryName -ErrorAction SilentlyContinue
+        $cmd = Get-Command $BinaryName -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($cmd -and $cmd.Source -and (Test-Path $cmd.Source)) {
             $ver = (Get-Item $cmd.Source).VersionInfo.ProductVersion
             if (-not $ver) { $ver = (Get-Item $cmd.Source).VersionInfo.FileVersion }
@@ -93,7 +182,7 @@ function Get-InstalledAppInfo {
 
     # 3. Check AppX / Modern Package
     if ($AppXPackageName) {
-        $appx = Get-AppxPackage -Name "*$AppXPackageName*" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $appx = Get-AppxPackageFromRegistry -NamePattern $AppXPackageName
         if ($appx) {
             return @{
                 IsInstalled      = $true
@@ -112,6 +201,24 @@ function Get-InstalledAppInfo {
     }
 }
 
+function Test-TrustedInstaller {
+    <#
+    .SYNOPSIS
+        Downloaded installers must carry a valid Authenticode signature before they are executed.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $sig = Get-AuthenticodeSignature -FilePath $Path -ErrorAction Stop
+        return [PSCustomObject]@{
+            IsTrusted = ($sig.Status -eq "Valid")
+            Status    = [string]$sig.Status
+            Signer    = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "" }
+        }
+    } catch {
+        return [PSCustomObject]@{ IsTrusted = $false; Status = "Error: $($_.Exception.Message)"; Signer = "" }
+    }
+}
+
 function Install-ResilientPackage {
     [CmdletBinding()]
     param(
@@ -120,11 +227,13 @@ function Install-ResilientPackage {
         [string]$WingetSource = "winget",
         [string]$DirectDownloadUrl = "",
         [string]$DirectSilentArgs = "/silent /install",
-        [string]$LocalCacheDir = "C:\PostInstall\Installers",
+        [string]$LocalCacheDir = (Join-Path $Script:PackageEngineRoot "Installers"),
         [string]$RegistryCheckPattern = "",
         [string]$BinaryName = "",
         [string]$MinVersion = "",
-        [switch]$ForceReinstall
+        [string]$AppXPackageName = "",
+        [switch]$ForceReinstall,
+        [switch]$AllowUnsignedDownload
     )
 
     $result = [PSCustomObject]@{
@@ -134,12 +243,20 @@ function Install-ResilientPackage {
         ExitCode         = -1
         InstalledVersion = ""
         ActionTaken      = "None"
+        RebootRequired   = $false
         Details          = ""
     }
 
     # --- Step 0: Smart App Version & Existence Pre-Check ---
     if (-not $ForceReinstall) {
-        $appInfo = Get-InstalledAppInfo -Name $Name -RegistryPattern $RegistryCheckPattern -BinaryName $BinaryName
+        $appInfo = Get-InstalledAppInfo -Name $Name -RegistryPattern $RegistryCheckPattern -BinaryName $BinaryName -AppXPackageName $AppXPackageName
+
+        # WinGet's own inventory is authoritative when no version floor is requested
+        if (-not $appInfo.IsInstalled -and [string]::IsNullOrWhiteSpace($MinVersion)) {
+            if ((Test-WingetPackageInstalled -WingetId $WingetId -WingetSource $WingetSource) -eq $true) {
+                $appInfo = @{ IsInstalled = $true; DisplayName = $Name; InstalledVersion = "winget"; Source = "WinGet" }
+            }
+        }
 
         if ($appInfo.IsInstalled) {
             $result.InstalledVersion = $appInfo.InstalledVersion
@@ -151,7 +268,7 @@ function Install-ResilientPackage {
                 $result.ExitCode    = 0
                 $result.ActionTaken = "SkippedAlreadyInstalled"
                 $result.Details     = "Zaten kurulu: $($appInfo.DisplayName) (v$($appInfo.InstalledVersion)). Kurulum atlandi."
-                Write-Output "[SKIP] $Name (v$($appInfo.InstalledVersion)) zaten bilgisayarda mevcut. Kurulum adimi atlandi."
+                Write-PackageLog "[SKIP] $Name (v$($appInfo.InstalledVersion)) zaten bilgisayarda mevcut. Kurulum adimi atlandi."
                 return $result
             } else {
                 # Version requested: compare
@@ -163,84 +280,105 @@ function Install-ResilientPackage {
                     $result.ExitCode    = 0
                     $result.ActionTaken = "SkippedUpToDate"
                     $result.Details     = "Zaten guncel: $($appInfo.DisplayName) (v$($appInfo.InstalledVersion) >= v$MinVersion). Kurulum atlandi."
-                    Write-Output "[SKIP] $Name v$($appInfo.InstalledVersion) zaten guncel (Hedef: v$MinVersion). Kurulum adimi atlandi."
+                    Write-PackageLog "[SKIP] $Name v$($appInfo.InstalledVersion) zaten guncel (Hedef: v$MinVersion). Kurulum adimi atlandi."
                     return $result
                 } else {
-                    Write-Output "[UPGRADE] $Name v$($appInfo.InstalledVersion) kurulu, ancak hedef surum v$MinVersion. Guncelleme baslatiliyor..."
+                    Write-PackageLog "[UPGRADE] $Name v$($appInfo.InstalledVersion) kurulu, ancak hedef surum v$MinVersion. Guncelleme baslatiliyor..."
                     $result.ActionTaken = "Upgrading"
                 }
             }
         } else {
-            Write-Output "[INSTALL] $Name bilgisayarda bulunamadi. Temiz kurulum baslatiliyor..."
+            Write-PackageLog "[INSTALL] $Name bilgisayarda bulunamadi. Temiz kurulum baslatiliyor..."
             $result.ActionTaken = "Installing"
         }
     }
 
     # --- Step 1: Tier 1: WinGet ---
-    $wingetCmd = Get-Command "winget.exe" -ErrorAction SilentlyContinue
-    if ($wingetCmd) {
-        Write-Output "[INFO] [$Name] Tier 1: WinGet deneniyor ($WingetId)..."
-        $scopeArg = if ($WingetSource -eq "msstore") { "" } else { "--scope machine" }
+    $winget = Get-WingetExe
+    if ($winget) {
+        Write-PackageLog "[INFO] [$Name] Tier 1: WinGet deneniyor ($WingetId)..."
         $actionCmd = if ($result.ActionTaken -eq "Upgrading") { "upgrade" } else { "install" }
-        $wingetArgs = "$actionCmd --id $WingetId --exact --silent --accept-package-agreements --accept-source-agreements $scopeArg --source $WingetSource".Trim()
+        $baseArgs  = @($actionCmd, "--id", $WingetId, "--exact", "--silent", "--accept-package-agreements",
+                       "--accept-source-agreements", "--disable-interactivity", "--source", $WingetSource)
 
-        try {
-            $proc = Start-Process -FilePath "winget.exe" -ArgumentList $wingetArgs -Wait -PassThru -NoNewWindow
-            # Exit codes: 0 = success, -1978335189 = already installed/no update, 2316632065 = reboot required
-            if ($proc.ExitCode -in @(0, -1978335189, 3010)) {
-                $result.Success  = $true
-                $result.TierUsed = "WinGet"
-                $result.ExitCode = 0
-                $result.Details  = "WinGet ile basariyla uygulandi."
-                Write-Output "[SUCCESS] $Name WinGet ile basariyla tamamlandi."
-                return $result
-            } else {
-                Write-Output "[WARN] [$Name] WinGet cikis kodu: $($proc.ExitCode). Fallback deneniyor..."
+        # msstore packages have no machine scope; for winget packages try machine scope first,
+        # then fall back to the installer's default scope (user-only installers reject --scope machine)
+        $attempts = New-Object System.Collections.Generic.List[object]
+        if ($WingetSource -ne "msstore") { $attempts.Add([string[]]@("--scope", "machine")) }
+        $attempts.Add([string[]]@())
+
+        foreach ($extra in $attempts) {
+            try {
+                $null = & $winget @baseArgs @extra 2>&1
+                $code = $LASTEXITCODE
+                if ($code -in $Script:WingetSuccessCodes -or $code -in $Script:WingetRebootCodes) {
+                    $result.Success        = $true
+                    $result.TierUsed       = "WinGet"
+                    $result.ExitCode       = $code
+                    $result.RebootRequired = ($code -in $Script:WingetRebootCodes)
+                    $result.Details        = "WinGet ile basariyla uygulandi (Kod: $code)."
+                    $rebootNote = if ($result.RebootRequired) { " Yeniden baslatma gerekiyor." } else { "" }
+                    Write-PackageLog "[SUCCESS] $Name WinGet ile basariyla tamamlandi.$rebootNote"
+                    return $result
+                }
+                if ($code -eq $Script:WingetCodes.NoApplicableInstaller -and $extra.Count -gt 0) {
+                    Write-PackageLog "[INFO] [$Name] Makine kapsaminda yukleyici yok, varsayilan kapsam deneniyor..."
+                    continue
+                }
+                Write-PackageLog "[WARN] [$Name] WinGet cikis kodu: $code (0x$('{0:X8}' -f $code)). Fallback deneniyor..."
+                break
+            } catch {
+                Write-PackageLog "[WARN] [$Name] WinGet calistirma hatasi: $_"
+                break
             }
-        } catch {
-            Write-Output "[WARN] [$Name] WinGet calistirma hatasi: $_"
         }
     }
 
     # --- Step 2: Tier 2: Direct Download via Official CDN ---
     if ($DirectDownloadUrl) {
-        Write-Output "[INFO] [$Name] Tier 2: Dogrudan uretici CDN indirmesi deneniyor: $DirectDownloadUrl"
+        Write-PackageLog "[INFO] [$Name] Tier 2: Dogrudan uretici CDN indirmesi deneniyor: $DirectDownloadUrl"
         $tempDir = Join-Path $env:TEMP "PostInstall_Packages"
         if (-not (Test-Path $tempDir)) { New-Item -Path $tempDir -ItemType Directory -Force | Out-Null }
-        
+
         $ext = if ($DirectDownloadUrl -like "*.msi*") { ".msi" } else { ".exe" }
         $tempFile = Join-Path $tempDir ("$($Name -replace '\W','_')_setup$ext")
 
         try {
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
             $wc = New-Object System.Net.WebClient
-            $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MaintenanceEngine/4.0")
+            $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MaintenanceEngine/4.1")
             $wc.DownloadFile($DirectDownloadUrl, $tempFile)
             $wc.Dispose()
 
             if ((Test-Path $tempFile) -and (Get-Item $tempFile).Length -gt 500000) {
-                Write-Output "[INFO] [$Name] Paket indirildi ($([math]::Round((Get-Item $tempFile).Length/1MB,1)) MB). Kuruluyor..."
-                
-                $execPath = $tempFile
-                $execArgs = $DirectSilentArgs
-                if ($tempFile -like "*.msi") {
-                    $execPath = "msiexec.exe"
-                    $execArgs = "/i `"$tempFile`" /qn /norestart ALLUSERS=1"
-                }
+                $trust = Test-TrustedInstaller -Path $tempFile
+                if (-not $trust.IsTrusted -and -not $AllowUnsignedDownload) {
+                    Write-PackageLog "[ERROR] [$Name] Indirilen dosyanin dijital imzasi gecersiz ($($trust.Status)). Guvenlik nedeniyle calistirilmadi."
+                } else {
+                    Write-PackageLog "[INFO] [$Name] Paket indirildi ($([math]::Round((Get-Item $tempFile).Length/1MB,1)) MB), imza: $($trust.Signer). Kuruluyor..."
 
-                $p = Start-Process -FilePath $execPath -ArgumentList $execArgs -Wait -PassThru -NoNewWindow
-                if ($p.ExitCode -in @(0, 3010, 1638)) {
-                    $result.Success  = $true
-                    $result.TierUsed = "DirectDownload"
-                    $result.ExitCode = $p.ExitCode
-                    $result.Details  = "Direct CDN ile basariyla kuruldu."
-                    Write-Output "[SUCCESS] $Name dogrudan indirme ile kuruldu (Kod: $($p.ExitCode))."
-                    Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-                    return $result
+                    $execPath = $tempFile
+                    $execArgs = $DirectSilentArgs
+                    if ($tempFile -like "*.msi") {
+                        $execPath = "msiexec.exe"
+                        $execArgs = "/i `"$tempFile`" /qn /norestart ALLUSERS=1"
+                    }
+
+                    $p = Start-Process -FilePath $execPath -ArgumentList $execArgs -Wait -PassThru -NoNewWindow
+                    if ($p.ExitCode -in @(0, 3010, 1641, 1638)) {
+                        $result.Success        = $true
+                        $result.TierUsed       = "DirectDownload"
+                        $result.ExitCode       = $p.ExitCode
+                        $result.RebootRequired = ($p.ExitCode -in @(3010, 1641))
+                        $result.Details        = "Direct CDN ile basariyla kuruldu."
+                        Write-PackageLog "[SUCCESS] $Name dogrudan indirme ile kuruldu (Kod: $($p.ExitCode))."
+                        return $result
+                    }
+                    Write-PackageLog "[WARN] [$Name] Dogrudan kurulum cikis kodu: $($p.ExitCode)"
                 }
             }
         } catch {
-            Write-Output "[WARN] [$Name] Dogrudan indirme hatasi: $_"
+            Write-PackageLog "[WARN] [$Name] Dogrudan indirme hatasi: $_"
         } finally {
             if (Test-Path $tempFile) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
         }
@@ -251,15 +389,16 @@ function Install-ResilientPackage {
         $localInstaller = Get-ChildItem -Path $LocalCacheDir -File -ErrorAction SilentlyContinue |
                           Where-Object { $_.BaseName -like "*$Name*" } | Select-Object -First 1
         if ($localInstaller) {
-            Write-Output "[INFO] [$Name] Tier 3: Yerel cevrimdisi onbellek bulundu: $($localInstaller.FullName)"
+            Write-PackageLog "[INFO] [$Name] Tier 3: Yerel cevrimdisi onbellek bulundu: $($localInstaller.FullName)"
             try {
                 $p = Start-Process -FilePath $localInstaller.FullName -ArgumentList $DirectSilentArgs -Wait -PassThru -NoNewWindow
-                if ($p.ExitCode -in @(0, 3010, 1638)) {
-                    $result.Success  = $true
-                    $result.TierUsed = "LocalCache"
-                    $result.ExitCode = $p.ExitCode
-                    $result.Details  = "Yerel onbellekten kuruldu."
-                    Write-Output "[SUCCESS] $Name yerel onbellek paketiyle kuruldu."
+                if ($p.ExitCode -in @(0, 3010, 1641, 1638)) {
+                    $result.Success        = $true
+                    $result.TierUsed       = "LocalCache"
+                    $result.ExitCode       = $p.ExitCode
+                    $result.RebootRequired = ($p.ExitCode -in @(3010, 1641))
+                    $result.Details        = "Yerel onbellekten kuruldu."
+                    Write-PackageLog "[SUCCESS] $Name yerel onbellek paketiyle kuruldu."
                     return $result
                 }
             } catch {}
@@ -267,6 +406,69 @@ function Install-ResilientPackage {
     }
 
     $result.Details = "Tum kurulum katmanlari (WinGet, CDN, Yerel) denendi ancak basarisiz oldu."
-    Write-Output "[WARN] [$Name] Kurulum tamamlanamadi."
+    Write-PackageLog "[WARN] [$Name] Kurulum tamamlanamadi."
     return $result
+}
+
+function Find-GpuProfile {
+    <#
+    .SYNOPSIS
+        Maps a Win32_VideoController name to its gpu_compatibility.json vendor + profile.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$GpuName,
+        $GpuDb
+    )
+    $vendorKey = "Virtual"
+    if ($GpuName -match "NVIDIA|GeForce|RTX|GTX|Quadro") { $vendorKey = "NVIDIA" }
+    elseif ($GpuName -match "AMD|Radeon") { $vendorKey = "AMD" }
+    elseif ($GpuName -match "Intel") { $vendorKey = "Intel" }
+
+    $matched = $null
+    if ($GpuDb -and $GpuDb.Vendors.$vendorKey) {
+        foreach ($p in $GpuDb.Vendors.$vendorKey.Profiles) {
+            if ($GpuName -match $p.Pattern) { $matched = $p; break }
+        }
+        if (-not $matched) { $matched = $GpuDb.Vendors.$vendorKey.Profiles | Select-Object -First 1 }
+    }
+    return [PSCustomObject]@{ VendorKey = $vendorKey; Vendor = $GpuDb.Vendors.$vendorKey; Profile = $matched }
+}
+
+function Get-GpuCompanionStatus {
+    param([Parameter(Mandatory)]$GpuProfile)
+    return (Get-InstalledAppInfo -Name $GpuProfile.RecommendedApp -RegistryPattern $GpuProfile.RegistryDisplayName -AppXPackageName $GpuProfile.AppxName)
+}
+
+function Install-GpuCompanionApp {
+    <#
+    .SYNOPSIS
+        Installs a GPU vendor companion app: primary id/source, then the alternative id/source.
+        When no automated source works, the vendor's manual download page is reported.
+    #>
+    param(
+        [Parameter(Mandatory)]$GpuProfile,
+        [switch]$ForceReinstall
+    )
+
+    $candidates = @()
+    if ($GpuProfile.WinGetId)    { $candidates += [PSCustomObject]@{ Id = $GpuProfile.WinGetId;    Source = $(if ($GpuProfile.WinGetSource) { $GpuProfile.WinGetSource } else { "winget" }) } }
+    if ($GpuProfile.AltWinGetId) { $candidates += [PSCustomObject]@{ Id = $GpuProfile.AltWinGetId; Source = $(if ($GpuProfile.AltWinGetSource) { $GpuProfile.AltWinGetSource } else { "winget" }) } }
+
+    $last = $null
+    foreach ($c in $candidates) {
+        Write-PackageLog "[INFO] [$($GpuProfile.RecommendedApp)] Kaynak: $($c.Source) / $($c.Id)"
+        $last = Install-ResilientPackage -Name $GpuProfile.RecommendedApp -WingetId $c.Id -WingetSource $c.Source `
+                    -RegistryCheckPattern $GpuProfile.RegistryDisplayName -AppXPackageName $GpuProfile.AppxName `
+                    -DirectDownloadUrl $GpuProfile.DirectDownloadUrl -ForceReinstall:$ForceReinstall
+        if ($last.Success) { return $last }
+    }
+
+    if (-not $last) {
+        $last = [PSCustomObject]@{ Name = $GpuProfile.RecommendedApp; Success = $false; TierUsed = "None"; ExitCode = -1
+                                   InstalledVersion = ""; ActionTaken = "None"; RebootRequired = $false; Details = "Otomatik kurulum kaynagi tanimli degil." }
+    }
+    if ($GpuProfile.ManualDownloadPage) {
+        $last.Details = "$($last.Details) Elle indirme: $($GpuProfile.ManualDownloadPage)"
+    }
+    return $last
 }

@@ -7,14 +7,18 @@ Installers/*
 !Installers/.gitkeep
 !Installers/README.md
 
-# Runtime State & Cache
-State/TestSandbox_*
-State/*.tmp
+# Offline driver packages (machine specific)
+Drivers/
+
+# Machine-specific snapshots (registry / environment exports may contain secrets)
+Backups/
+
+# Runtime State & Cache (runtime data now lives in %ProgramData%\ComputerMaintenancePro)
+State/
 *.tmp
 
 # Local logs
 *.log
-Installers/debug.log
 
-# Temporary test outputs
-TestResults.json.tmp
+# Test outputs (regenerated on every run)
+TestResults.json

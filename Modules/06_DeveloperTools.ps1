@@ -20,7 +20,7 @@ $ErrorActionPreference = "Continue"
 
 Write-Output "[INFO] 06_DeveloperTools: Akilli surum kontrolu ve paket kurulumu baslatiliyor..."
 
-$engineRoot = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { "C:\PostInstall" }
+$engineRoot = Split-Path -Parent $PSScriptRoot
 $packageEngine = Join-Path $engineRoot "Tools\PackageEngine.ps1"
 if (Test-Path $packageEngine) {
     . $packageEngine
@@ -28,6 +28,8 @@ if (Test-Path $packageEngine) {
     Write-Output "[ERROR] PackageEngine.ps1 bulunamadi: $packageEngine"
     exit 1
 }
+
+$results = New-Object System.Collections.Generic.List[object]
 
 #region === 1. DEV TOOLS ===
 Write-Output "[INFO] ===== 1. GELISTIRICI ARACLARI & PROGRAMLAMA ====="
@@ -102,7 +104,7 @@ foreach ($pkg in $devPackages) {
         -BinaryName $pkg.BinaryName `
         -MinVersion $pkg.MinVersion `
         -DirectDownloadUrl $pkg.DirectUrl `
-        -DirectSilentArgs $pkg.DirectArgs | Out-Null
+        -DirectSilentArgs $pkg.DirectArgs | ForEach-Object { $results.Add($_) }
 }
 #endregion
 
@@ -113,18 +115,18 @@ Install-ResilientPackage `
     -Name "Antigravity (Google AGY)" `
     -WingetId "Google.Antigravity" `
     -RegistryCheckPattern "Antigravity" `
-    -BinaryName "agy" | Out-Null
+    -BinaryName "agy" | ForEach-Object { $results.Add($_) }
 
 Install-ResilientPackage `
     -Name "Claude (Anthropic)" `
     -WingetId "Anthropic.Claude" `
-    -RegistryCheckPattern "Claude" | Out-Null
+    -RegistryCheckPattern "Claude" | ForEach-Object { $results.Add($_) }
 
 Install-ResilientPackage `
     -Name "ChatGPT (OpenAI)" `
     -WingetId "9PLM9XGG6VKS" `
     -WingetSource "msstore" `
-    -RegistryCheckPattern "ChatGPT" | Out-Null
+    -RegistryCheckPattern "ChatGPT" | ForEach-Object { $results.Add($_) }
 #endregion
 
 #region === 3. WEB & GAMING APPS ===
@@ -138,21 +140,21 @@ Install-ResilientPackage `
     -BinaryName "chrome" `
     -MinVersion "120.0.0" `
     -DirectDownloadUrl "https://dl.google.com/chrome/install/latest/chrome_installer.exe" `
-    -DirectSilentArgs "/silent /install" | Out-Null
+    -DirectSilentArgs "/silent /install" | ForEach-Object { $results.Add($_) }
 
 # Opera GX
 Install-ResilientPackage `
     -Name "Opera GX" `
     -WingetId "XPDBZ4MPRKNN30" `
     -WingetSource "msstore" `
-    -RegistryCheckPattern "Opera GX" | Out-Null
+    -RegistryCheckPattern "Opera GX" | ForEach-Object { $results.Add($_) }
 
 # Xbox App
 Install-ResilientPackage `
     -Name "Xbox (Microsoft Gaming)" `
     -WingetId "9MV0B5HZVK9Z" `
     -WingetSource "msstore" `
-    -RegistryCheckPattern "Xbox" | Out-Null
+    -RegistryCheckPattern "Xbox" | ForEach-Object { $results.Add($_) }
 #endregion
 
 # Refresh session environment PATH
@@ -163,5 +165,17 @@ try {
     Write-Output "`n[INFO] Oturum PATH ortam degiskenleri yenilendi."
 } catch {}
 
+# Summary
+$ok      = @($results | Where-Object { $_.Success })
+$failed  = @($results | Where-Object { -not $_.Success })
+$skipped = @($ok | Where-Object { $_.ActionTaken -like "Skipped*" })
+Write-Output "`n[INFO] ===== PAKET OZETI ====="
+Write-Output "[INFO] Toplam: $($results.Count) | Kuruldu/Guncellendi: $($ok.Count - $skipped.Count) | Zaten kurulu: $($skipped.Count) | Basarisiz: $($failed.Count)"
+foreach ($item in $failed) { Write-Output "[WARN]   Basarisiz: $($item.Name) - $($item.Details)" }
+
+if (@($results | Where-Object { $_.RebootRequired }).Count -gt 0) {
+    Write-Output "[WARN] 06_DeveloperTools tamamlandi - bazi paketler yeniden baslatma istiyor."
+    exit 3010
+}
 Write-Output "[SUCCESS] 06_DeveloperTools tamamlandi."
 exit 0

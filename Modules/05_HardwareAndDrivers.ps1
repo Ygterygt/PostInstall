@@ -15,6 +15,7 @@
 param()
 
 $ErrorActionPreference = "Continue"
+. (Join-Path (Split-Path -Parent $PSScriptRoot) "Tools\Common.ps1")
 
 Write-Output "[INFO] 05_HardwareAndDrivers: Evrensel donanim ve surucu saglik taramasi baslatiliyor..."
 Write-Output "[INFO] Hedef Sistem: $env:COMPUTERNAME | Kullanici: $env:USERNAME"
@@ -109,21 +110,19 @@ try {
 
 #region === 6. MEMORY & XMP NOTIFICATION ===
 try {
-    $rams = Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue
-    if ($rams) {
-        $r1 = $rams | Select-Object -First 1
-        $actualSpeed = if ($r1.ConfiguredClockSpeed) { $r1.ConfiguredClockSpeed * 2 } else { $r1.Speed }
-        $ratedSpeed  = $r1.Speed
-        if ($ratedSpeed -gt $actualSpeed -and $actualSpeed -lt 2933) {
-            Write-Output "[NOTE] Donanim Uyarisi: RAM bellekleriniz $ratedSpeed MHz desteklemesine ragmen su an $actualSpeed MHz hizinda calisiyor. BIOS'tan XMP/DOCP/EXPO acilmasi tavsiye edilir."
+    $mem = Get-MemorySpeedInfo
+    if ($mem.ActualMTs -gt 0) {
+        if ($mem.BelowRatedSpeed) {
+            Write-Output "[NOTE] Donanim Uyarisi: RAM modulleri $($mem.RatedMTs) MT/s destekliyor ancak $($mem.ActualMTs) MT/s calisiyor. BIOS'tan XMP/DOCP/EXPO acilmasi tavsiye edilir."
         } else {
-            Write-Output "[SUCCESS] RAM calisma frekansi: $actualSpeed MHz."
+            Write-Output "[SUCCESS] RAM calisma hizi: $($mem.ActualMTs) MT/s (Nominal: $($mem.RatedMTs) MT/s)."
         }
     }
 } catch {}
+#endregion
 #region === 7. OFFLINE DRIVER INJECTION (PnP INF PACKAGES) ===
-$driverDir = "C:\PostInstall\Drivers"
-$driverEnginePath = "C:\PostInstall\Tools\DriverEngine.ps1"
+$driverDir = Join-Path (Get-SuiteRoot) "Drivers"
+$driverEnginePath = Join-Path (Get-SuiteRoot) "Tools\DriverEngine.ps1"
 if ((Test-Path $driverDir) -and (Test-Path $driverEnginePath)) {
     . $driverEnginePath
     $res = Install-SystemDrivers -DriverSourceDir $driverDir

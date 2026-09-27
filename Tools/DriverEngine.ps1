@@ -11,7 +11,7 @@
 function Export-SystemDrivers {
     [CmdletBinding()]
     param(
-        [string]$Destination = "C:\PostInstall\Backups\Drivers"
+        [string]$Destination = (Join-Path $env:ProgramData "ComputerMaintenancePro\Backups\Drivers")
     )
 
     $result = [PSCustomObject]@{
@@ -40,7 +40,7 @@ function Export-SystemDrivers {
         } else {
             # Fallback to pnputil /export-driver
             $result.Method = "pnputil.exe"
-            $pnpOut = & pnputil.exe /export-driver * $Destination 2>&1
+            $null = & pnputil.exe /export-driver * $Destination 2>&1
             $exportedInfs = Get-ChildItem -Path $Destination -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue
             $result.ExportedCount = if ($exportedInfs) { $exportedInfs.Count } else { 0 }
             $result.Success = ($LASTEXITCODE -eq 0 -or $result.ExportedCount -gt 0)
@@ -59,7 +59,7 @@ function Export-SystemDrivers {
 function Install-SystemDrivers {
     [CmdletBinding()]
     param(
-        [string]$DriverSourceDir = "C:\PostInstall\Drivers"
+        [string]$DriverSourceDir = (Join-Path (Split-Path -Parent $PSScriptRoot) "Drivers")
     )
 
     $result = [PSCustomObject]@{
@@ -91,7 +91,7 @@ function Install-SystemDrivers {
 
         # Use pnputil /add-driver to inject all INF packages
         $targetInfPattern = Join-Path $DriverSourceDir "*.inf"
-        $pnpOut = & pnputil.exe /add-driver $targetInfPattern /subdirs /install 2>&1
+        $null = & pnputil.exe /add-driver $targetInfPattern /subdirs /install 2>&1
         $result.Success = ($LASTEXITCODE -in @(0, 259, 3010))
         $result.InstalledCount = $result.DiscoveredInfs
     } catch {
