@@ -29,6 +29,8 @@ Bu dosya [Keep a Changelog](https://keepachangelog.com/tr-TR/1.1.0/) biçimini, 
 - Bakım işlemlerinin motorun kendi log/state dosyalarını silmesi.
 - Canlı izlemede anlamsız CPU yüzdesi ve saat hızı.
 - Türkçe karakterlerin log'larda bozulması; modül çıktısının adım bitince toplu gelmesi.
+- Sekme ve kutu başlıklarında `&` işaretinin görünmemesi ("GPU & Sürücüler", "Anakart & BIOS").
+- Kurulum Sihirbazı'nda sayfa başlıklarının üst çubuğun altında kalması.
 
 ### Değişenler
 - Log, state ve raporlar artık `%ProgramData%\ComputerMaintenancePro` altında; program klasörü USB'ye ya da başka

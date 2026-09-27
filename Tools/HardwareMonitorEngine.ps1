@@ -196,9 +196,9 @@ function Get-LiveTelemetrySample {
             ChargePct  = $battery.EstimatedChargeRemaining
             Status     = switch ($battery.BatteryStatus) {
                 1 { "Pilde" }
-                2 { "AC Bagli" }
+                2 { "Şarjda (AC bağlı)" }
                 3 { "Tam Dolu" }
-                default { "Bagli" }
+                default { "Bağlı" }
             }
         }
     } else {
