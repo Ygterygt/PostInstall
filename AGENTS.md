@@ -10,9 +10,9 @@ Windows 10/11 için **kurulum sonrası (post-install) hazırlık + sistem bakım
 Tek bir WinForms arayüzünden:
 
 - **Canlı İzleme:** CPU/GPU/RAM/disk/pil telemetrisi (2 sn'de bir)
-- **Sistem Bakımı:** temp temizliği, Windows Update önbelleği, DISM, ağ sıfırlama, TRIM, pil raporu
+- **Sistem Bakımı:** temp temizliği, Windows Update önbelleği, DISM, ağ sıfırlama, TRIM, pil raporu; haftalık **zamanlanmış bakım** (Görev Zamanlayıcı)
 - **Kurulum Sihirbazı:** `steps.json`'daki 13 modülü sırayla çalıştırır; yeniden başlatmaya dayanıklıdır
-- **GPU & Sürücüler:** GPU'ya göre üretici yardımcı yazılımı önerir/kurar, sürücü yedekler
+- **GPU & Sürücüler:** GPU'ya göre üretici yardımcı yazılımını önerir/kurar (sürücü yedekleme yok; sürücü güncellemeleri `Installers\` ile yapılır)
 - **Güncellemeler:** `winget upgrade` ile güncellemesi olan uygulamaları listeler, seçilenleri sırayla günceller
 - **Konsol & Loglar:** tüm olayların birleşik günlüğü
 
@@ -47,17 +47,20 @@ PostInstall.exe (Program.cs)        UAC ile yükseltir, konsolsuz powershell.exe
 | `config.json` | Yollar, reboot, retry, `Maintenance.*`, `Network.*`, `Updates.ExcludeIds` ayarları |
 | `gpu_compatibility.json` | GPU → yardımcı yazılım eşlemesi (`WinGetId` + `WinGetSource`, `AppxName`, `ManualDownloadPage`, `Note`) |
 | `Modules\00…12_*.ps1` | Kurulum adımları (sıra `steps.json`'daki `Order`'a göredir; `08_PostInstallAudit` en sondadır) |
+| `Tools\ChangeJournal.ps1` | Ayar değişikliği günlüğü: `Set-TrackedRegistryValue`, `Set-TrackedServiceStartType`, `Set-TrackedPowerPlan/PowerTimeout`, `Set-TrackedTrim`, `Set-TrackedTcpGlobal`, `Set-TrackedDnsServers`, `Set-TrackedMpPreference`; `Undo-ChangeJournal` (en yeniden eskiye) |
 | `Tools\Common.ps1` | Ortak: `Get-SuiteRoot`, `Get-SuiteConfig`, `Get-SuiteDataDir`, RAM hız normalizasyonu, REG_EXPAND_SZ-güvenli PATH |
 | `Tools\PackageEngine.ps1` | `Install-ResilientPackage` (WinGet → imzalı CDN → yerel önbellek), GPU yardımcıları (`Find-GpuProfile`, `Install-GpuCompanionApp`) |
 | `Tools\MaintenanceEngine.ps1` | Temizlik/DISM/ağ/TRIM/pil fonksiyonları |
 | `Tools\UpdateEngine.ps1` | `Get-AvailableAppUpdates`, `Update-AppPackage`, `ConvertFrom-WingetTable` (winget tablosunu **sütun konumuna göre** ayrıştırır; başlıklar yerelleştirilmiş olabilir) |
+| `Tools\SchedulerEngine.ps1` | Zamanlanmış bakım ayarları (varsayılan `config.ScheduledMaintenance` ← kullanıcı seçimi `State\ScheduledMaintenance.json`), görev kaydı/durumu (`\ComputerMaintenancePro\` klasörü) |
+| `Tools\Invoke-ScheduledMaintenance.ps1` | Görevin çalıştırdığı betik; `-DryRun` yalnızca planı yazar. Log: `Logs\ScheduledMaintenance.log`, özet: `Reports\LastScheduledMaintenance.json` |
 | `Tools\HardwareMonitorEngine.ps1` | Telemetri örneği (`Get-LiveTelemetrySample`) |
 | `Tools\SilentDetector.ps1` | Yükleyici türü + sessiz parametre tespiti, "zaten kurulu mu" kontrolü |
-| `Tools\SnapshotEngine.ps1`, `DriverEngine.ps1`, `ReportingEngine.ps1`, `SystemSpecsCollector.ps1` | Geri yükleme noktası, sürücü yedek/enjeksiyon, HTML rapor, donanım profili |
+| `Tools\SnapshotEngine.ps1`, `DriverEngine.ps1`, `ReportingEngine.ps1`, `SystemSpecsCollector.ps1` | Geri yükleme noktası, `Drivers\` klasöründen çevrimdışı INF enjeksiyonu (modül 05), HTML rapor, donanım profili |
 | `Tools\Build-Launcher.ps1` | `Program.cs` → `PostInstall.exe` (Windows'taki `csc.exe` ile) |
 | `Tools\Enforce-Encoding.ps1` | Tüm `.ps1/.json` dosyalarını UTF-8 **BOM'lu** yapar |
 | `Test-PostInstallSuite.ps1` | Test bataryası (aşağıya bakın) |
-| `Installers\` | Kullanıcının çevrimdışı kurulum dosyaları (git'e girmez) |
+| `Installers\` | Çevrimdışı kurulum dosyaları (git'e girmez). Modül 10 hepsini sessiz kurar; aynı/yeni sürüm kuruluysa atlar, **eski kuruluysa günceller**. GPU sürücü güncellemeleri de buradan yapılır (NVIDIA: `-s -noreboot`, AMD Adrenalin: `-install`) |
 
 ## 4. Çalışma zamanı dosyaları
 
@@ -70,6 +73,8 @@ Hepsi `%ProgramData%\ComputerMaintenancePro\` altındadır (repo içinde **deği
 | `State\PostInstall_State.json` | Motor state'i (oturum, adım sonuçları, seçili adımlar) |
 | `State\OfflineSelection.json` | Sihirbaz sayfa 3'te seçilen yükleyiciler (modül 10 okur) |
 | `State\UI.pid` | Tek örnek kilidini tutan UI sürecinin PID'i |
+| `State\ChangeJournal.json` | Modüllerin değiştirdiği ayarlar + önceki değerleri (geri alma için; test için ``) |
+| `State\ScheduledMaintenance.json` | Zamanlanmış bakım için kullanıcı seçimleri (repo'daki `config.json` değiştirilmez) |
 | `Backups\`, `Reports\`, `EventLogArchive\` | Registry/ortam/DNS/sürücü yedekleri, raporlar, arşivlenen olay günlükleri |
 
 ## 5. Test ve doğrulama
@@ -106,6 +111,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-Launcher.ps1
 - **Yeni GPU profili / paket kimliği:** Kimliği `winget show --id <ID> --exact --source <winget|msstore>` ile doğrulayın;
   `WinGetSource` zorunlu. Store uygulamasının **sürücüyle uyumlu ve güncel** olduğunu da kontrol edin (bkz. Tuzak 8).
   Sabit sürüm içeren doğrudan indirme URL'si eklemeyin; üretici sayfası `ManualDownloadPage`'e yazılır.
+- **Ayar değiştiren kod** değeri doğrudan yazmaz; `Tools\ChangeJournal.ps1`'deki `Set-Tracked*` fonksiyonlarını kullanır (önceki değer kaydedilir, arayüzden geri alınabilir). Güvenliği düşürecek geri almalar `-NotUndoable` ile işaretlenir.
 - **İndirilen kurulum dosyaları** geçerli Authenticode imzası olmadan çalıştırılmaz.
 - **Varsayılan olarak yıkıcı olmayın:** Geri Dönüşüm Kutusu, olay günlükleri, DNS, ResetBase gibi işlemler `config.json`
   ile açılır/kapanır ve yedeklenir.

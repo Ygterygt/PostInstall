@@ -131,9 +131,9 @@ $Script:EnginePath      = Join-Path $Script:UIRoot "PostInstallEngine.ps1"
 $Script:DetectorPath    = Join-Path $Script:UIRoot "Tools\SilentDetector.ps1"
 $Script:SpecsPath       = Join-Path $Script:UIRoot "Tools\SystemSpecsCollector.ps1"
 $Script:SnapshotPath    = Join-Path $Script:UIRoot "Tools\SnapshotEngine.ps1"
-$Script:DriverEnginePath = Join-Path $Script:UIRoot "Tools\DriverEngine.ps1"
 $Script:PackageEnginePath = Join-Path $Script:UIRoot "Tools\PackageEngine.ps1"
 $Script:MaintEnginePath = Join-Path $Script:UIRoot "Tools\MaintenanceEngine.ps1"
+$Script:SchedulerEnginePath = Join-Path $Script:UIRoot "Tools\SchedulerEngine.ps1"
 $Script:HwMonEnginePath = Join-Path $Script:UIRoot "Tools\HardwareMonitorEngine.ps1"
 $Script:UpdateEnginePath = Join-Path $Script:UIRoot "Tools\UpdateEngine.ps1"
 $Script:GpuDbPath       = Join-Path $Script:UIRoot "gpu_compatibility.json"
@@ -147,9 +147,11 @@ if (-not (Test-Path $Script:EnginePath)) {
 if (Test-Path $Script:DetectorPath)     { . $Script:DetectorPath }
 if (Test-Path $Script:SpecsPath)        { . $Script:SpecsPath }
 if (Test-Path $Script:SnapshotPath)     { . $Script:SnapshotPath }
-if (Test-Path $Script:DriverEnginePath) { . $Script:DriverEnginePath }
 if (Test-Path $Script:PackageEnginePath){ . $Script:PackageEnginePath }
 if (Test-Path $Script:MaintEnginePath)  { . $Script:MaintEnginePath }
+if (Test-Path $Script:SchedulerEnginePath) { . $Script:SchedulerEnginePath }
+$Script:ChangeJournalPath = Join-Path $Script:UIRoot "Tools\ChangeJournal.ps1"
+if (Test-Path $Script:ChangeJournalPath) { . $Script:ChangeJournalPath }
 if (Test-Path $Script:HwMonEnginePath)  { . $Script:HwMonEnginePath }
 
 # Load GPU Database
@@ -517,6 +519,294 @@ $splMaint.Orientation  = [System.Windows.Forms.Orientation]::Horizontal
 $splMaint.SplitterDistance = 290
 $splMaint.BackColor    = $Theme.Border
 $pnlTabMaint.Controls.Add($splMaint)
+
+# Scheduled maintenance strip (CMP-23): weekly unattended run via Task Scheduler
+$Script:SchedDays = [ordered]@{ Monday = "Pazartesi"; Tuesday = "Salı"; Wednesday = "Çarşamba"; Thursday = "Perşembe"; Friday = "Cuma"; Saturday = "Cumartesi"; Sunday = "Pazar" }
+$Script:SchedStatusLoaded = $false
+
+$pnlSched = New-Object System.Windows.Forms.Panel
+$pnlSched.Dock      = [System.Windows.Forms.DockStyle]::Top
+$pnlSched.Height    = 76
+$pnlSched.BackColor = $Theme.BgCard
+$pnlSched.Padding   = New-Object System.Windows.Forms.Padding(10, 6, 10, 4)
+
+$flpSched = New-Object System.Windows.Forms.FlowLayoutPanel
+$flpSched.Dock         = [System.Windows.Forms.DockStyle]::Top
+$flpSched.Height       = 38
+$flpSched.WrapContents = $false
+$flpSched.BackColor    = [System.Drawing.Color]::Transparent
+
+function New-SchedLabel { param([string]$Text, [System.Drawing.Color]$Color)
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $Text; $l.AutoSize = $true; $l.ForeColor = $Color; $l.Font = $Theme.FontCardHdr
+    $l.Margin = New-Object System.Windows.Forms.Padding(0, 8, 8, 0); $l.UseMnemonic = $false
+    return $l
+}
+function New-SchedCheck { param([string]$Text)
+    $c = New-Object System.Windows.Forms.CheckBox
+    $c.Text = $Text; $c.AutoSize = $true; $c.ForeColor = $Theme.TextPrimary; $c.Font = $Theme.FontSub
+    $c.Margin = New-Object System.Windows.Forms.Padding(0, 8, 10, 0)
+    return $c
+}
+function New-SchedButton { param([string]$Text, [int]$Width, [System.Drawing.Color]$Bg)
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $Text; $b.Size = New-Object System.Drawing.Size($Width, 28); $b.Font = $Theme.FontButton
+    $b.BackColor = $Bg; $b.ForeColor = [System.Drawing.Color]::White; $b.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $b.FlatAppearance.BorderColor = $Theme.Border; $b.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $b.Margin = New-Object System.Windows.Forms.Padding(0, 3, 6, 0)
+    return $b
+}
+
+$chkSchedTemp = New-SchedCheck "Temp"
+$chkSchedDns  = New-SchedCheck "DNS"
+$chkSchedTrim = New-SchedCheck "TRIM"
+$chkSchedUpd  = New-SchedCheck "Uygulama güncellemeleri"
+
+$cmbSchedDay = New-Object System.Windows.Forms.ComboBox
+$cmbSchedDay.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+$cmbSchedDay.Width = 105
+$cmbSchedDay.Margin = New-Object System.Windows.Forms.Padding(4, 5, 6, 0)
+foreach ($d in $Script:SchedDays.Values) { [void]$cmbSchedDay.Items.Add($d) }
+
+$dtpSchedTime = New-Object System.Windows.Forms.DateTimePicker
+$dtpSchedTime.Format       = [System.Windows.Forms.DateTimePickerFormat]::Custom
+$dtpSchedTime.CustomFormat = "HH:mm"
+$dtpSchedTime.ShowUpDown   = $true
+$dtpSchedTime.Width        = 70
+$dtpSchedTime.Margin       = New-Object System.Windows.Forms.Padding(0, 5, 10, 0)
+
+$btnSchedSave   = New-SchedButton "Kaydet ve Etkinleştir" 160 $Theme.AccentGreen
+$btnSchedRun    = New-SchedButton "Şimdi Çalıştır" 110 $Theme.AccentBlue
+$btnSchedRemove = New-SchedButton "Kaldır" 70 $Theme.BgInput
+
+$flpSched.Controls.AddRange(@(
+    (New-SchedLabel "⏰ Zamanlanmış Bakım" $Theme.AccentAmber),
+    $chkSchedTemp, $chkSchedDns, $chkSchedTrim, $chkSchedUpd,
+    (New-SchedLabel "Her" $Theme.TextMuted), $cmbSchedDay, $dtpSchedTime
+))
+
+# Second row: status text (left) + action buttons (right)
+$flpSchedBtns = New-Object System.Windows.Forms.FlowLayoutPanel
+$flpSchedBtns.Dock          = [System.Windows.Forms.DockStyle]::Right
+$flpSchedBtns.Width         = 370
+$flpSchedBtns.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+$flpSchedBtns.WrapContents  = $false
+$flpSchedBtns.BackColor     = [System.Drawing.Color]::Transparent
+$flpSchedBtns.Controls.AddRange(@($btnSchedRemove, $btnSchedRun, $btnSchedSave))
+
+$lblSchedStatus = New-Object System.Windows.Forms.Label
+$lblSchedStatus.Dock        = [System.Windows.Forms.DockStyle]::Fill
+$lblSchedStatus.Font        = $Theme.FontSub
+$lblSchedStatus.ForeColor   = $Theme.TextMuted
+$lblSchedStatus.TextAlign   = [System.Drawing.ContentAlignment]::MiddleLeft
+$lblSchedStatus.UseMnemonic = $false
+$lblSchedStatus.Text        = "Durum yükleniyor..."
+
+$pnlSched.Controls.Add($lblSchedStatus)
+$pnlSched.Controls.Add($flpSchedBtns)
+$pnlSched.Controls.Add($flpSched)
+$lblSchedStatus.BringToFront()
+$pnlTabMaint.Controls.Add($pnlSched)
+$splMaint.BringToFront()   # Fill must be front-most (AGENTS.md pitfall 7)
+
+function Get-SchedSettingsFromUi {
+    $s = Get-ScheduledMaintenanceSettings
+    $s.CleanTemp  = $chkSchedTemp.Checked
+    $s.FlushDns   = $chkSchedDns.Checked
+    $s.ReTrim     = $chkSchedTrim.Checked
+    $s.UpdateApps = $chkSchedUpd.Checked
+    $s.DayOfWeek  = @($Script:SchedDays.Keys)[$cmbSchedDay.SelectedIndex]
+    $s.Time       = $dtpSchedTime.Value.ToString("HH:mm")
+    return $s
+}
+
+function Update-SchedPanel {
+    try {
+        $s = Get-ScheduledMaintenanceSettings
+        $chkSchedTemp.Checked = [bool]$s.CleanTemp
+        $chkSchedDns.Checked  = [bool]$s.FlushDns
+        $chkSchedTrim.Checked = [bool]$s.ReTrim
+        $chkSchedUpd.Checked  = [bool]$s.UpdateApps
+        $cmbSchedDay.SelectedIndex = [Math]::Max(0, @($Script:SchedDays.Keys).IndexOf($s.DayOfWeek))
+        $hm = $s.Time -split ":"
+        $dtpSchedTime.Value = (Get-Date).Date.AddHours([int]$hm[0]).AddMinutes([int]$hm[1])
+
+        $st = Get-MaintenanceTaskStatus -TaskName $s.TaskName
+        if (-not $st.Registered) {
+            $lblSchedStatus.ForeColor = $Theme.TextMuted
+            $lblSchedStatus.Text = "Kapalı. İşlemleri ve zamanı seçip etkinleştirin."
+        } else {
+            $next = if ($st.NextRunTime) { $st.NextRunTime.ToString("dd.MM.yyyy HH:mm") } else { "-" }
+            $last = if ($st.LastRunTime) {
+                        $ok = if ($st.LastTaskResult -eq 0) { "başarılı" } else { "sonuç kodu $($st.LastTaskResult)" }
+                        "$($st.LastRunTime.ToString('dd.MM.yyyy HH:mm')) ($ok)"
+                    } else { "henüz çalışmadı" }
+            $lblSchedStatus.ForeColor = $Theme.AccentGreen
+            $lblSchedStatus.Text = "Etkin • Sonraki: $next • Son: $last • Log: ProgramData\ComputerMaintenancePro\Logs\ScheduledMaintenance.log"
+        }
+    } catch {
+        $lblSchedStatus.ForeColor = $Theme.AccentAmber
+        $lblSchedStatus.Text = "Zamanlanmış bakım durumu okunamadı: $($_.Exception.Message)"
+    }
+}
+
+$btnSchedSave.Add_Click({
+    try {
+        $s = Get-SchedSettingsFromUi
+        Save-ScheduledMaintenanceSettings -Settings $s
+        Register-MaintenanceTask -Settings $s | Out-Null
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] Zamanlanmış bakım etkinleştirildi: her $($Script:SchedDays[$s.DayOfWeek]) $($s.Time).`r`n")
+    } catch {
+        $hint = if ($_.Exception.Message -match "Access is denied|Erişim engellendi|0x80070005") { " (Yönetici olarak açın: PostInstall.exe)" } else { "" }
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Zamanlanmış bakım kaydedilemedi: $($_.Exception.Message)$hint`r`n")
+    }
+    Update-SchedPanel
+})
+
+$btnSchedRun.Add_Click({
+    try {
+        Start-MaintenanceTaskNow
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] Zamanlanmış bakım görevi şimdi başlatıldı (arka planda çalışır, sonuç logda).`r`n")
+    } catch {
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Görev başlatılamadı (önce 'Kaydet ve Etkinleştir'): $($_.Exception.Message)`r`n")
+    }
+    Update-SchedPanel
+})
+
+$btnSchedRemove.Add_Click({
+    try {
+        $removed = Unregister-MaintenanceTask
+        $msg = if ($removed) { "[SUCCESS] Zamanlanmış bakım kaldırıldı." } else { "Kayıtlı zamanlanmış bakım yok." }
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] $msg`r`n")
+    } catch {
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Görev kaldırılamadı: $($_.Exception.Message)`r`n")
+    }
+    Update-SchedPanel
+})
+
+# Change journal dialog (CMP-25): lists every setting the modules changed and reverts selected ones
+function Format-JournalValue {
+    param($Entry, [string]$Which)
+    if ($Which -eq "Prev" -and $Entry.Kind -eq "Registry" -and -not $Entry.PreviousExists) { return "(yoktu)" }
+    $v = if ($Which -eq "Prev") { $Entry.PreviousValue } else { $Entry.NewValue }
+    if ($null -eq $v -or "$v" -eq "") { return "-" }
+    if ($Entry.Kind -eq "PowerSetting") { return "{0} dk" -f [Math]::Round([int]$v / 60) }
+    return "$v"
+}
+
+function Show-ChangeJournalDialog {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text            = "Yapılan Değişiklikler ve Geri Alma"
+    $dlg.Size            = New-Object System.Drawing.Size(1000, 560)
+    $dlg.StartPosition   = [System.Windows.Forms.FormStartPosition]::CenterParent
+    $dlg.BackColor       = $Theme.BgMain
+    $dlg.ForeColor       = $Theme.TextPrimary
+    $dlg.MinimizeBox     = $false
+    $dlg.ShowInTaskbar   = $false
+
+    $lblInfo = New-Object System.Windows.Forms.Label
+    $lblInfo.Dock        = [System.Windows.Forms.DockStyle]::Top
+    $lblInfo.Height      = 44
+    $lblInfo.Padding     = New-Object System.Windows.Forms.Padding(12, 6, 12, 0)
+    $lblInfo.Font        = $Theme.FontSub
+    $lblInfo.ForeColor   = $Theme.TextMuted
+    $lblInfo.UseMnemonic = $false
+    $lblInfo.Text        = "Kurulum modüllerinin değiştirdiği ayarlar ve önceki değerleri. Seçilenler en yeniden en eskiye doğru önceki değerine döndürülür.`r`nGüvenliği düşüreceği için UAC ve SMBv1 değişiklikleri listelenir ama geri alınmaz. Güç/servis/sistem ayarları için uygulama yönetici olarak açık olmalıdır."
+
+    $lv = New-Object System.Windows.Forms.ListView
+    $lv.Dock          = [System.Windows.Forms.DockStyle]::Fill
+    $lv.View          = [System.Windows.Forms.View]::Details
+    $lv.CheckBoxes    = $true
+    $lv.FullRowSelect = $true
+    $lv.BackColor     = $Theme.BgCard
+    $lv.ForeColor     = $Theme.TextPrimary
+    $lv.Font          = $Theme.FontSub
+    $lv.BorderStyle   = [System.Windows.Forms.BorderStyle]::None
+    foreach ($col in @(@("Tarih", 120), @("Modül", 150), @("Açıklama", 330), @("Önceki", 120), @("Yeni", 120), @("Durum", 120))) {
+        $lv.Columns.Add($col[0], $col[1]) | Out-Null
+    }
+
+    $pnlBtns = New-Object System.Windows.Forms.FlowLayoutPanel
+    $pnlBtns.Dock          = [System.Windows.Forms.DockStyle]::Bottom
+    $pnlBtns.Height        = 46
+    $pnlBtns.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+    $pnlBtns.Padding       = New-Object System.Windows.Forms.Padding(8)
+    $pnlBtns.BackColor     = $Theme.BgHeader
+
+    $btnClose = New-UpdBarButton "Kapat" 90 $Theme.BgInput $Theme.TextPrimary
+    $btnUndo  = New-UpdBarButton "↩️ Seçilileri Geri Al" 170 $Theme.AccentAmber ([System.Drawing.Color]::Black)
+    $btnAll   = New-UpdBarButton "Tümünü Seç" 100 $Theme.BgInput $Theme.TextPrimary
+    $pnlBtns.Controls.AddRange(@($btnClose, $btnUndo, $btnAll))
+
+    $fill = {
+        $lv.Items.Clear()
+        $entries = @(Get-ChangeJournal) | Sort-Object { $_.Timestamp } -Descending
+        foreach ($e in $entries) {
+            $when = try { ([datetime]$e.Timestamp).ToString("dd.MM.yyyy HH:mm") } catch { "$($e.Timestamp)" }
+            $lvi = New-Object System.Windows.Forms.ListViewItem($when)
+            $desc = if ($e.Description) { $e.Description } else { "$($e.Target) $($e.Name)" }
+            foreach ($v in @($e.Module, $desc, (Format-JournalValue $e "Prev"), (Format-JournalValue $e "New"))) { $lvi.SubItems.Add([string]$v) | Out-Null }
+            $state = if ($e.Reverted) { "Geri alındı" } elseif (-not $e.Undoable) { "Geri alınmaz" } else { "Uygulandı" }
+            $lvi.SubItems.Add($state) | Out-Null
+            $lvi.Tag = $e
+            if ($e.Reverted -or -not $e.Undoable) { $lvi.ForeColor = $Theme.TextMuted }
+            if ($e.Note) { $lvi.ToolTipText = $e.Note }
+            $lv.Items.Add($lvi) | Out-Null
+        }
+        if ($entries.Count -eq 0) {
+            $lvi = New-Object System.Windows.Forms.ListViewItem("-")
+            $lvi.SubItems.Add("") | Out-Null
+            $lvi.SubItems.Add("Henüz kayıtlı bir ayar değişikliği yok (kurulum sihirbazı modülleri çalıştığında burada listelenir).") | Out-Null
+            $lvi.ForeColor = $Theme.TextMuted
+            $lv.Items.Add($lvi) | Out-Null
+        }
+    }
+    $lv.ShowItemToolTips = $true
+    $lv.Add_ItemCheck({
+        param($s, $ev)
+        # Reverted / not-undoable rows cannot be selected
+        $item = $s.Items[$ev.Index]
+        if (-not $item.Tag -or $item.Tag.Reverted -or -not $item.Tag.Undoable) { $ev.NewValue = [System.Windows.Forms.CheckState]::Unchecked }
+    })
+
+    $btnAll.Add_Click({ foreach ($i in $lv.Items) { $i.Checked = $true } })
+    $btnClose.Add_Click({ $dlg.Close() })
+    $btnUndo.Add_Click({
+        $ids = @($lv.Items | Where-Object { $_.Checked -and $_.Tag } | ForEach-Object { $_.Tag.Id })
+        if ($ids.Count -eq 0) { return }
+        $ok = [System.Windows.Forms.MessageBox]::Show("$($ids.Count) ayar önceki değerine döndürülecek. Devam edilsin mi?", "Geri Al",
+                  [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($ok -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        $dlg.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+        try {
+            foreach ($r in @(Undo-ChangeJournal -Ids $ids)) {
+                $tag = if ($r.Success) { "[SUCCESS]" } else { "[ERROR]" }
+                $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] $tag $($r.Message)`r`n")
+            }
+        } finally {
+            $dlg.Cursor = [System.Windows.Forms.Cursors]::Default
+        }
+        & $fill
+    })
+
+    # Dock order: Fill control front-most (AGENTS.md pitfall 7)
+    $dlg.Controls.Add($lblInfo)
+    $dlg.Controls.Add($pnlBtns)
+    $dlg.Controls.Add($lv)
+    $lv.BringToFront()
+    & $fill
+    [void]$dlg.ShowDialog($form)
+    $dlg.Dispose()
+}
+
+$btnJournal = New-SchedButton "↩️ Değişiklikleri Geri Al" 180 $Theme.AccentAmber
+$btnJournal.ForeColor = [System.Drawing.Color]::Black
+$btnJournal.Add_Click({
+    try { Show-ChangeJournalDialog }
+    catch { $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Değişiklik listesi açılamadı: $($_.Exception.Message)`r`n") }
+})
+$flpSchedBtns.Width += 186
+$flpSchedBtns.Controls.Add($btnJournal)
 
 # Action Buttons Table Layout
 $tlpMaintActions = New-Object System.Windows.Forms.TableLayoutPanel
@@ -1358,7 +1648,10 @@ function Switch-AppTab {
 
     switch ($TabName) {
         "Monitoring"  { $pnlTabMon.BringToFront() }
-        "Maintenance" { $pnlTabMaint.BringToFront() }
+        "Maintenance" {
+            $pnlTabMaint.BringToFront()
+            if (-not $Script:SchedStatusLoaded) { $Script:SchedStatusLoaded = $true; Update-SchedPanel }
+        }
         "Wizard"      { $pnlTabWizard.BringToFront() }
         "GpuCenter"   {
             $pnlTabGpu.BringToFront()
@@ -1583,17 +1876,6 @@ function Update-GpuCenterCard {
         $btnInstallGpu.Cursor    = [System.Windows.Forms.Cursors]::Hand
         $btnRow.Controls.Add($btnInstallGpu)
 
-        $btnExportDrv = New-Object System.Windows.Forms.Button
-        $btnExportDrv.Text      = "⚡ Sürücüyü Yedekle"
-        $btnExportDrv.Font      = $Theme.FontButton
-        $btnExportDrv.Dock      = [System.Windows.Forms.DockStyle]::Right
-        $btnExportDrv.Width     = 160
-        $btnExportDrv.BackColor = $Theme.BgInput
-        $btnExportDrv.ForeColor = $Theme.TextPrimary
-        $btnExportDrv.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-        $btnExportDrv.FlatAppearance.BorderColor = $Theme.Border
-        $btnExportDrv.Cursor    = [System.Windows.Forms.Cursors]::Hand
-        $btnRow.Controls.Add($btnExportDrv)
 
         # Proper WinForms dock stack order: Fill first, Bottom next, Top last
         $card.Controls.Add($lblDetails)
@@ -1637,25 +1919,6 @@ function Update-GpuCenterCard {
             } -ArgumentList @($info.Profile, $info.App, $Script:GpuMsgQueue, $Script:PackageEnginePath, $Script:GpuDoneMarker) | Out-Null
         })
 
-        $btnExportDrv.Add_Click({
-            $this.Enabled = $false
-            Write-GpuLog "Sistem sürücüleri %ProgramData%\ComputerMaintenancePro\Backups\Drivers klasörüne yedekleniyor..."
-            Start-ScriptBlockAsync -Track -ScriptBlock {
-                param($path, $q, $doneMarker)
-                try {
-                    if (Test-Path $path) { . $path }
-                    $res = Export-SystemDrivers
-                    if ($res.Success) {
-                        $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] $($res.ExportedCount) sürücü yedeklendi: $($res.Destination)")
-                    } else {
-                        $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Sürücü yedekleme başarısız: $($res.ErrorMessage)")
-                    }
-                } catch {
-                    $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Sürücü yedekleme hatası: $($_.Exception.Message)")
-                }
-                $q.Enqueue($doneMarker)
-            } -ArgumentList @($Script:DriverEnginePath, $Script:GpuMsgQueue, $Script:GpuDoneMarker) | Out-Null
-        })
 
         $flpGpuCards.Controls.Add($card)
     }

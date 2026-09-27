@@ -187,6 +187,75 @@ Invoke-SuiteTest -Category "Unit" -Name "ConvertFrom-WingetTable (EN/TR, truncat
     "EN + TR headers parsed by position; empty output handled"
 }
 
+Invoke-SuiteTest -Category "Unit" -Name "SchedulerEngine (settings, validation, task definition, dry run)" -Body {
+    . (Join-Path $Root "Tools\SchedulerEngine.ps1")
+    $sb = New-Sandbox "Sched"
+    try {
+        $path = Join-Path $sb "ScheduledMaintenance.json"
+        $s = Get-ScheduledMaintenanceSettings -Path $path
+        Assert-True ($s.CleanTemp -and -not $s.UpdateApps) "defaults"
+        $s.DayOfWeek = "Wednesday"; $s.Time = "19:30"; $s.UpdateApps = $true
+        Save-ScheduledMaintenanceSettings -Settings $s -Path $path
+        $r = Get-ScheduledMaintenanceSettings -Path $path
+        Assert-True ($r.DayOfWeek -eq "Wednesday" -and $r.Time -eq "19:30" -and $r.UpdateApps) "roundtrip"
+
+        $bad = [PSCustomObject]@{ DayOfWeek = "Sunday"; Time = "25:00"; CleanTemp = $true; FlushDns = $false; ReTrim = $false; UpdateApps = $false }
+        $rejected = $false; try { Assert-ScheduledMaintenanceSettings $bad } catch { $rejected = $true }
+        Assert-True $rejected "invalid time rejected"
+        $none = [PSCustomObject]@{ DayOfWeek = "Sunday"; Time = "10:00"; CleanTemp = $false; FlushDns = $false; ReTrim = $false; UpdateApps = $false }
+        $rejected = $false; try { Assert-ScheduledMaintenanceSettings $none } catch { $rejected = $true }
+        Assert-True $rejected "no action rejected"
+
+        $def = New-MaintenanceTaskDefinition -Settings $r
+        # Regression: PS 5.1 stores UTC ("...Z") which drifts across DST; boundary must be local
+        Assert-True ($def.Trigger.StartBoundary -match 'T19:30:00$') "local StartBoundary (got $($def.Trigger.StartBoundary))"
+        Assert-True ($def.Settings.DisallowStartIfOnBatteries -and $def.Settings.StartWhenAvailable) "battery/catch-up settings"
+        Assert-True ($def.Action.Arguments -like "*Invoke-ScheduledMaintenance.ps1*") "runner path"
+
+        $out = & $WinPS -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "Tools\Invoke-ScheduledMaintenance.ps1") -DryRun -SettingsPath $path 2>&1 | Out-String
+        Assert-True ($out -match "PLAN=CleanTemp,FlushDns,ReTrim,UpdateApps") "dry-run plan: $out"
+        "settings roundtrip, validation, local trigger, battery-safe settings, dry-run plan OK"
+    } finally {
+        Remove-Item $sb -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-SuiteTest -Category "Unit" -Name "ChangeJournal (track, no-op, undo newest-first, not-undoable)" -Body {
+    $sb = New-Sandbox "Journal"
+    $key = "HKCU:\Software\CMP_Test_Journal_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    $prevEnv = $env:CMP_CHANGE_JOURNAL
+    try {
+        $env:CMP_CHANGE_JOURNAL = Join-Path $sb "ChangeJournal.json"
+        . (Join-Path $Root "Tools\ChangeJournal.ps1")
+        New-Item $key -Force | Out-Null
+        Set-ItemProperty $key -Name "Existing" -Value 5 -Type DWord
+
+        $a = Set-TrackedRegistryValue -Path $key -Name "Existing" -Value 7 -Description "changed"
+        $b = Set-TrackedRegistryValue -Path $key -Name "Created" -Value "x" -Type String -Description "created"
+        $n = Set-TrackedRegistryValue -Path $key -Name "Existing" -Value 7 -Description "same"
+        Assert-True ($a -and $b -and $null -eq $n) "no-op writes must not be journaled"
+        # Twice changed value: undo newest-first must end at the ORIGINAL value
+        $c = Set-TrackedRegistryValue -Path $key -Name "Existing" -Value 9 -Description "changed again"
+        $x = Add-ChangeJournalEntry -Kind "Feature" -Target "SMB1Protocol" -PreviousValue "Enabled" -NewValue "Disabled" -NotUndoable
+        Assert-True (@(Get-ChangeJournal).Count -eq 4) "journal count"
+
+        $refused = Undo-ChangeJournalEntry -Id $x.Id
+        Assert-True (-not $refused.Success) "not-undoable entry refused"
+
+        $res = @(Undo-ChangeJournal)
+        Assert-True ($res.Count -eq 3 -and @($res | Where-Object { -not $_.Success }).Count -eq 0) "3 undone"
+        $k = Get-Item $key
+        Assert-True ($k.GetValue("Existing") -eq 5) "original value restored (got $($k.GetValue('Existing')))"
+        Assert-True ($k.GetValueNames() -notcontains "Created") "created value removed"
+        Assert-True (@(Get-ChangeJournal | Where-Object { $_.Reverted }).Count -eq 3) "entries marked reverted"
+        "journaled only real changes; newest-first undo restored originals; security entries protected"
+    } finally {
+        $env:CMP_CHANGE_JOURNAL = $prevEnv
+        Remove-Item $key -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $sb -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Invoke-SuiteTest -Category "Unit" -Name "Find-GpuProfile matching" -Body {
     . (Join-Path $Root "Tools\PackageEngine.ps1")
     $gpuJson = Get-Content -Path (Join-Path $Root "gpu_compatibility.json") -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -323,10 +392,10 @@ Invoke-SuiteTest -Category "Tools Sandbox" -Name "DriverEngine.ps1 (INF discover
     try {
         # Discovery only: an empty sub-folder filter means pnputil receives no valid package
         [System.IO.File]::WriteAllText((Join-Path $sb "test_device.inf"), "; Test INF`n[Version]`nSignature=`"`$Windows NT$`"`nClass=System`n")
-        Assert-True ((Get-Command Export-SystemDrivers -ErrorAction SilentlyContinue) -ne $null) "Export-SystemDrivers exported"
+        Assert-True ((Get-Command Install-SystemDrivers -ErrorAction SilentlyContinue) -ne $null) "Install-SystemDrivers exported"
         $infs = @(Get-ChildItem -Path $sb -Filter "*.inf" -Recurse)
         Assert-True ($infs.Count -eq 1) "INF discovery"
-        "Export/Install functions exported, INF discovery OK"
+        "Install-SystemDrivers exported, INF discovery OK"
     } finally {
         Remove-Item $sb -Recurse -Force -ErrorAction SilentlyContinue
     }

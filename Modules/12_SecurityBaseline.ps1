@@ -14,6 +14,7 @@
 param()
 
 $ErrorActionPreference = "Continue"
+. (Join-Path (Split-Path -Parent $PSScriptRoot) "Tools\ChangeJournal.ps1")
 
 Write-Output "[INFO] 12_SecurityBaseline: Kurumsal guvenlik tabani ve Defender sikilastirmasi baslatiliyor..."
 
@@ -25,7 +26,8 @@ try {
         $enableLua = (Get-ItemProperty $uacKey -Name "EnableLUA" -ErrorAction SilentlyContinue).EnableLUA
 
         if ($enableLua -ne 1) {
-            Set-ItemProperty -Path $uacKey -Name "EnableLUA" -Value 1 -Type DWord -Force
+            Set-TrackedRegistryValue -Path $uacKey -Name "EnableLUA" -Value 1 -Description "UAC etkinlestirildi (EnableLUA=1)" `
+                -NotUndoable -Note "UAC'yi yeniden kapatmak guvenligi dusurur." | Out-Null
             Write-Output "[SUCCESS] UAC anahtari (EnableLUA) guvenli seviyeye alindi."
         } else {
             Write-Output "[SUCCESS] UAC aktif ve devrede (EnableLUA = 1)."
@@ -40,16 +42,15 @@ try {
 Write-Output "[INFO] Windows Defender SmartScreen & Bulut Koruma durumu yapilandiriliyor..."
 try {
     $systemPolicyKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
-    if (-not (Test-Path $systemPolicyKey)) { New-Item -Path $systemPolicyKey -Force | Out-Null }
-    
-    # Enable SmartScreen for Windows Explorer
-    Set-ItemProperty -Path $systemPolicyKey -Name "EnableSmartScreen" -Value 1 -Type DWord -Force
-    Set-ItemProperty -Path $systemPolicyKey -Name "ShellSmartScreenLevel" -Value "Warn" -Type String -Force
+
+    # Enable SmartScreen for Windows Explorer (journaled: Sistem Bakimi > Degisiklikleri Geri Al)
+    Set-TrackedRegistryValue -Path $systemPolicyKey -Name "EnableSmartScreen" -Value 1 -Description "SmartScreen (Gezgin) etkin" | Out-Null
+    Set-TrackedRegistryValue -Path $systemPolicyKey -Name "ShellSmartScreenLevel" -Value "Warn" -Type String -Description "SmartScreen seviyesi: Uyar" | Out-Null
     Write-Output "[SUCCESS] Windows Explorer SmartScreen korumasi aktif."
 
-    # Defender Cloud Delivered Protection
-    Set-MpPreference -MAPSReporting Advanced -ErrorAction SilentlyContinue
-    Set-MpPreference -SubmitSamplesConsent SendSafeSamples -ErrorAction SilentlyContinue
+    # Defender Cloud Delivered Protection (2 = Advanced MAPS, 1 = send safe samples)
+    try { Set-TrackedMpPreference -Name "MAPSReporting" -Value 2 -Description "Defender bulut korumasi: Gelismis" | Out-Null } catch { Write-Output "[WARN] MAPSReporting: $_" }
+    try { Set-TrackedMpPreference -Name "SubmitSamplesConsent" -Value 1 -Description "Defender: guvenli numuneleri gonder" | Out-Null } catch { Write-Output "[WARN] SubmitSamplesConsent: $_" }
     Write-Output "[SUCCESS] Defender Bulut Korumasi ve Guvenli Numune Analizi aktif."
 } catch {
     Write-Output "[WARN] SmartScreen / Defender ayarlari yapilandirilamadi: $_"
@@ -62,6 +63,8 @@ try {
     $smb1 = Get-WindowsOptionalFeature -Online -FeatureName "SMB1Protocol" -ErrorAction SilentlyContinue
     if ($smb1 -and $smb1.State -eq "Enabled") {
         Disable-WindowsOptionalFeature -Online -FeatureName "SMB1Protocol" -NoRestart -ErrorAction SilentlyContinue | Out-Null
+        Add-ChangeJournalEntry -Kind "Feature" -Target "SMB1Protocol" -PreviousValue "Enabled" -NewValue "Disabled" `
+            -Description "SMBv1 devre disi" -NotUndoable -Note "SMBv1'i yeniden acmak fidye yazilimi riskini artirir." | Out-Null
         Write-Output "[SUCCESS] Eski guvensiz SMBv1 protokolü devre disi birakildi (Ransomware onlemi)."
     } else {
         Write-Output "[SUCCESS] SMBv1 protokolü zaten devre disi (Sistem guvende)."

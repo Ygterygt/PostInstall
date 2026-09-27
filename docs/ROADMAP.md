@@ -85,6 +85,7 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-19 | 🔴 | Motorun `param([switch]$Resume)` bloğu dot-source edilince UI'ın `$Resume`'unu `$false` yapıyor → reboot sonrası GUI kuruluma **hiç** otomatik devam etmiyordu | CLI parametreleri alias ile yeniden adlandırıldı (`-Resume` CLI'da aynen çalışır) + regresyon testi | ✅ Done |
 | CMP-21a | 🔴 | Uygulama kapatılırken "Bağımsız değişken türleri eşleşmiyor" hata diyaloğu (PS 5.1'de `@()` + `List[object]` binder hatası, FormClosing) | `.ToArray()` + kapanış adımları izole `try` + regresyon testi; kapanış diyalogsuz doğrulandı | ✅ Done |
 | CMP-22a | 🟠 | GPU veritabanındaki 7 winget kimliğinden 6'sı mevcut değildi (`0x8A150014`); doğrudan URL'lerin çoğu 404/403 ya da HTML sayfasıydı | Kimlikler `winget show` ile doğrulandı, kaynak (winget/msstore) alanı eklendi, AppX tespiti, sabit sürüm URL'leri yerine `ManualDownloadPage`, şema + eşleşme testleri | ✅ Done |
+| CMP-33 | 🟢 | GPU kartlarındaki 'Sürücüyü Yedekle' (119 paket / ~7 GB tek klasöre, geçmişsiz) kaldırıldı; sürücü güncellemeleri `Installers\` üzerinden resmi paketlerle (NVIDIA `-s -noreboot`, AMD `-install`) | Kullanıcı kararı; eski sürüme dönüş için Aygıt Yöneticisi 'Sürücüyü Geri Al' | ✅ Done |
 | CMP-20a | 🟠 | PS 5.1'de `ConvertFrom-Json` diziyi tek nesne yayar; `$PSScriptRoot` betik `param()` varsayılanlarında boştur | İki tuzak da testlerle kilitlendi | ✅ Done |
 
 ### 🟢 Backlog — Özellikler (Sprint 3+)
@@ -94,9 +95,9 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-20 | Paket listesini `packages.json` kataloğuna taşı, sihirbazda uygulama bazlı seçim | winutil |
 | CMP-21 | Sabit sürümlü CDN URL'leri yerine Evergreen ile güncel URL | evergreen |
 | CMP-22 | LibreHardwareMonitorLib ile gerçek sensörler (CPU paket sıcaklığı, fan, güç) | LibreHardwareMonitor |
-| CMP-23 | Zamanlanmış bakım + günlük uygulama güncellemesi (Task Scheduler, allow/block list) | Winget-AutoUpdate |
+| CMP-23 | ✅ **Done (Sprint 3)** — Bakım sekmesinde "Zamanlanmış Bakım" paneli: haftalık Görev Zamanlayıcı görevi (kullanıcı adına, en yüksek yetki), Temp/DNS/TRIM/uygulama güncellemeleri, pildeyken çalışmaz, kaçırılırsa ilk fırsatta çalışır, sihirbaz çalışırken atlanır | Winget-AutoUpdate |
 | CMP-24 | Windows Update kurulumu (yalnız tarama değil) + sürücü güncellemeleri | PSWindowsUpdate |
-| CMP-25 | Her tweak için geri alma (undo) ve "önceki değer" kaydı | Win11Debloat, Sophia |
+| CMP-25 | ✅ **Done (Sprint 3)** — Değişiklik günlüğü (`State\ChangeJournal.json`): modül 01/11/12'nin registry, servis, güç, TRIM, TCP, DNS ve Defender değişiklikleri önceki değerleriyle kaydedilir; Bakım sekmesinden tek tek/toplu geri alınır. UAC ve SMBv1 güvenlik gereği geri alınmaz | Win11Debloat, Sophia |
 | CMP-26 | ASR kuralları (audit modu), Defender PUA koruması | Harden-Windows-Security |
 | CMP-27 | Telemetri geçmişi (CSV) + raporda trend grafikleri, sağlık skoru | UniGetUI / LHM |
 | CMP-28 | ✅ **Done (Sprint 3)** — Güncellemeler sekmesi: `winget upgrade` tablosu sütun konumuna göre ayrıştırılır (dil bağımsız), seçili uygulamalar sırayla güncellenir, `config.Updates.ExcludeIds` ile hariç tutma | UniGetUI |

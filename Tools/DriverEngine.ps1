@@ -1,60 +1,11 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    DriverEngine.ps1 - Enterprise Hardware Driver Backup & Offline Injection Engine
+    DriverEngine.ps1 - Offline Driver Injection Engine (Drivers\ folder, used by module 05)
 .DESCRIPTION
     Inspired by pnputil and Export-WindowsDriver best practices:
-    1. Export-SystemDrivers: Exports all third-party drivers (OEM INF packages) to a backup directory.
-    2. Install-SystemDrivers: Scans a designated folder for .inf drivers and silently injects/installs them.
+    1. Install-SystemDrivers: Scans a designated folder for .inf drivers and silently injects/installs them.
 #>
-
-function Export-SystemDrivers {
-    [CmdletBinding()]
-    param(
-        [string]$Destination = (Join-Path $env:ProgramData "ComputerMaintenancePro\Backups\Drivers")
-    )
-
-    $result = [PSCustomObject]@{
-        Success        = $false
-        Destination    = $Destination
-        ExportedCount  = 0
-        DurationSec    = 0
-        Method         = "PnPUtil"
-        ErrorMessage   = $null
-    }
-
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-
-    try {
-        if (-not (Test-Path $Destination)) {
-            New-Item -Path $Destination -ItemType Directory -Force | Out-Null
-        }
-
-        # Try native Export-WindowsDriver first (PS 5.1+)
-        $cmdExport = Get-Command "Export-WindowsDriver" -ErrorAction SilentlyContinue
-        if ($cmdExport) {
-            $result.Method = "Export-WindowsDriver"
-            $drvList = Export-WindowsDriver -Online -Destination $Destination -ErrorAction Stop
-            $result.ExportedCount = if ($drvList) { $drvList.Count } else { 0 }
-            $result.Success = $true
-        } else {
-            # Fallback to pnputil /export-driver
-            $result.Method = "pnputil.exe"
-            $null = & pnputil.exe /export-driver * $Destination 2>&1
-            $exportedInfs = Get-ChildItem -Path $Destination -Filter "*.inf" -Recurse -ErrorAction SilentlyContinue
-            $result.ExportedCount = if ($exportedInfs) { $exportedInfs.Count } else { 0 }
-            $result.Success = ($LASTEXITCODE -eq 0 -or $result.ExportedCount -gt 0)
-        }
-    } catch {
-        $result.ErrorMessage = $_.Exception.Message
-        $result.Success = $false
-    } finally {
-        $sw.Stop()
-        $result.DurationSec = [Math]::Round($sw.Elapsed.TotalSeconds, 2)
-    }
-
-    return $result
-}
 
 function Install-SystemDrivers {
     [CmdletBinding()]

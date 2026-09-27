@@ -43,22 +43,17 @@ foreach ($nic in $activeNics) {
 #endregion
 
 #region === 2. TCP WINDOW AUTO-TUNING & STACK OPTIMIZATION ===
+. (Join-Path (Split-Path -Parent $PSScriptRoot) "Tools\ChangeJournal.ps1")
 Write-Output "[INFO] TCP IP ag yigini optimizasyonu..."
 try {
-    # Set TCP auto-tuning to normal (prevents network throttling on high-speed connections)
-    & netsh.exe int tcp set global autotuninglevel=normal 2>&1 | Out-Null
-    Write-Output "[SUCCESS] TCP Window Auto-Tuning: Normal olarak ayarlandi."
+    # Auto-tuning 'normal' prevents throttling on fast links; RSS spreads packet processing over cores.
+    # Previous values are journaled (Sistem Bakimi > Degisiklikleri Geri Al).
+    $tcpChanges = @(Set-TrackedTcpGlobal -AutoTuning normal -Rss enabled)
+    Write-Output "[SUCCESS] TCP Window Auto-Tuning: Normal, RSS: etkin ($($tcpChanges.Count) degisiklik)."
 } catch {
-    Write-Output "[WARN] TCP Auto-Tuning ayarlanamadi: $_"
+    Write-Output "[WARN] TCP ayarlari uygulanamadi: $_"
 }
-
-try {
-    # Enable RSS (Receive Side Scaling) for multi-core CPU packet processing
-    & netsh.exe int tcp set global rss=enabled 2>&1 | Out-Null
-    Write-Output "[SUCCESS] TCP RSS (Receive Side Scaling) etkinlestirildi."
-} catch {}
 #endregion
-
 #region === 3. FAST SECURE DNS CONFIGURATION (OPTIONAL / SAFE) ===
 . (Join-Path (Split-Path -Parent $PSScriptRoot) "Tools\Common.ps1")
 $netCfg     = (Get-SuiteConfig).Network
@@ -92,7 +87,7 @@ if (-not $changeDns) {
             }
 
             $backup += [PSCustomObject]@{ InterfaceAlias = $alias; InterfaceGuid = "$($nic.InterfaceGuid)"; PreviousDns = $currentDns; Mode = "DHCP" }
-            Set-DnsClientServerAddress -InterfaceAlias $alias -ServerAddresses $dnsServers -ErrorAction Stop
+            Set-TrackedDnsServers -InterfaceAlias $alias -Servers $dnsServers -PreviousServers $currentDns | Out-Null
             Write-Output "[SUCCESS] $($alias): DNS atandi ($($dnsServers -join ' / ')). Geri almak icin: Set-DnsClientServerAddress -InterfaceAlias '$alias' -ResetServerAddresses"
         } catch {
             Write-Output "[WARN] DNS yapilandirma uyarisi ($($nic.InterfaceAlias)): $_"
