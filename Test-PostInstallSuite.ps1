@@ -445,6 +445,48 @@ Invoke-SuiteTest -Category "Binary Health" -Name "PostInstall.exe Integrity & En
     "Size: $($rawBytes.Length) bytes, Runtime: $($asm.ImageRuntimeVersion), EntryPoint: $($asm.EntryPoint.DeclaringType.FullName).$($asm.EntryPoint.Name)"
 }
 
+Invoke-SuiteTest -Category "Release" -Name "CHANGELOG has an entry for config.json Version" -Body {
+    $version = (Get-Content (Join-Path $Root "config.json") -Raw -Encoding UTF8 | ConvertFrom-Json).Version
+    Assert-True ($version -match '^\d+\.\d+\.\d+$') "Version is X.Y.Z ($version)"
+    $changelog = Get-Content (Join-Path $Root "CHANGELOG.md") -Raw -Encoding UTF8
+    Assert-True ($changelog -match ("(?m)^## \[" + [regex]::Escape($version) + "\]")) "CHANGELOG section for $version"
+    "v$version documented"
+}
+
+Invoke-SuiteTest -Category "Release" -Name "Release package: allow-list, versioned exe, tag check" -Body {
+    $sb = New-Sandbox "Release"
+    try {
+        $version = (Get-Content (Join-Path $Root "config.json") -Raw -Encoding UTF8 | ConvertFrom-Json).Version
+        $pkg = & (Join-Path $Root "Tools\New-ReleasePackage.ps1") -OutputDir $sb 6>$null | Select-Object -Last 1
+        Assert-True (Test-Path -LiteralPath $pkg.ZipPath) "zip created"
+        Assert-True ((Get-Content -LiteralPath $pkg.Sha256Path -Raw) -match "^$($pkg.Sha256)  ") "sha256 file"
+
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($pkg.ZipPath)
+        try { $entries = @($zip.Entries | ForEach-Object { $_.FullName -replace '/', '\' }) } finally { $zip.Dispose() }
+        foreach ($must in @("PostInstall.exe", "PostInstallUI.ps1", "PostInstallEngine.ps1", "config.json", "steps.json",
+                            "KULLANIM.md", "CHANGELOG.md", "Tools\Common.ps1", "Installers\README.md")) {
+            Assert-True ($entries -contains "ComputerMaintenancePro\$must") "package contains $must"
+        }
+        $steps = Get-Content (Join-Path $Root "steps.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($s in @($steps)) { Assert-True ($entries -contains "ComputerMaintenancePro\Modules\$($s.Script -replace '^Modules[\\/]', '')") "module $($s.Script)" }
+        $leaked = @($entries | Where-Object { $_ -match '\\(dev|docs|\.github|\.git)\\|Test-PostInstallSuite|TestResults|Program\.cs|AGENTS|CLAUDE|New-ReleasePackage|Build-Launcher|\\Installers\\.+\.(exe|msi)$' })
+        Assert-True ($leaked.Count -eq 0) "no dev/test files: $($leaked -join ', ')"
+
+        $extract = Join-Path $sb "x"
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($pkg.ZipPath, $extract)
+        $fv = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $extract "ComputerMaintenancePro\PostInstall.exe"))
+        Assert-True ($fv.ProductVersion -eq $version) "exe ProductVersion $($fv.ProductVersion) = $version"
+
+        $tagRejected = $false
+        try { & (Join-Path $Root "Tools\New-ReleasePackage.ps1") -OutputDir $sb -Tag "v0.0.1" 6>$null | Out-Null } catch { $tagRejected = $true }
+        Assert-True $tagRejected "mismatched tag rejected"
+        "$($entries.Count) entries, exe v$($fv.ProductVersion)"
+    } finally {
+        Remove-Item $sb -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # -------------------------------------------------------------
 # 6. ENGINE END-TO-END (ISOLATED SANDBOX)
 # -------------------------------------------------------------

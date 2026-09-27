@@ -106,7 +106,7 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-29 | `PostInstallUI.ps1` (1700 satır) sekme başına dosyalara bölünsün | — |
 | CMP-30 | TR/EN yerelleştirme kaynak dosyası | Sophia |
 | CMP-31 | ⬆️ **Öncelik yükseldi (dağıtım)** — Betik ve exe için kod imzalama (imzasız exe SmartScreen/antivirüs uyarısına takılır) | PSADT |
-| CMP-36 | ⬆️ **Dağıtım** — Sürüm paketi: `config.json`'dan sürüm, CHANGELOG, etiketle (tag) tetiklenen GitHub Actions release, test/docs/dev/Installers hariç zip, son kullanıcı README'si | — |
+| CMP-36 | ✅ **Done (Sprint 4)** — Sürüm paketi: `config.json`'dan sürüm (exe'ye de işlenir), `CHANGELOG.md`, `v*` etiketiyle tetiklenen `release.yml` (test → zip + SHA256 → GitHub Release, notlar CHANGELOG'dan), izin listesiyle paketleme (`Tools\New-ReleasePackage.ps1`), son kullanıcı kılavuzu `KULLANIM.md`; rapor artık masaüstüne kopyalanmıyor | — |
 
 ## 4. Sprint 1–2 Teslim Özeti (2026-09-27)
 

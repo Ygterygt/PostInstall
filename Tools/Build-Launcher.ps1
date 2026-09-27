@@ -23,13 +23,31 @@ $csc = Get-ChildItem "$env:WINDIR\Microsoft.NET\Framework64\v4*\csc.exe", "$env:
        Sort-Object FullName -Descending | Select-Object -First 1
 if (-not $csc) { throw "csc.exe bulunamadi (.NET Framework 4.x gerekli)." }
 
+# Stamp the exe with the suite version (Explorer > Properties > Details) from config.json
+$version = (Get-Content (Join-Path $root "config.json") -Raw -Encoding UTF8 | ConvertFrom-Json).Version
+if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "config.json Version gecersiz: '$version' (beklenen: X.Y.Z)" }
+$assemblyInfo = Join-Path $env:TEMP ("CMP_AssemblyInfo_{0}.cs" -f [Guid]::NewGuid().ToString("N").Substring(0, 8))
+@"
+using System.Reflection;
+[assembly: AssemblyTitle("Computer Maintenance Pro")]
+[assembly: AssemblyProduct("Computer Maintenance Pro")]
+[assembly: AssemblyDescription("Windows kurulum sonrasi hazirlik, bakim ve izleme araci")]
+[assembly: AssemblyVersion("$version.0")]
+[assembly: AssemblyFileVersion("$version.0")]
+[assembly: AssemblyInformationalVersion("$version")]
+"@ | Set-Content -Path $assemblyInfo -Encoding UTF8
+
 Write-Host "[INFO] Derleyici : $($csc.FullName)"
-Write-Host "[INFO] Kaynak    : $source"
+Write-Host "[INFO] Kaynak    : $source (v$version)"
 Write-Host "[INFO] Cikti     : $OutputPath"
 
-& $csc.FullName /nologo /target:winexe /platform:anycpu /optimize+ /utf8output `
-    /reference:System.Windows.Forms.dll "/out:$OutputPath" $source
-if ($LASTEXITCODE -ne 0) { throw "Derleme basarisiz (csc exit $LASTEXITCODE)." }
+try {
+    & $csc.FullName /nologo /target:winexe /platform:anycpu /optimize+ /utf8output `
+        /reference:System.Windows.Forms.dll "/out:$OutputPath" $source $assemblyInfo
+    if ($LASTEXITCODE -ne 0) { throw "Derleme basarisiz (csc exit $LASTEXITCODE)." }
+} finally {
+    Remove-Item -LiteralPath $assemblyInfo -Force -ErrorAction SilentlyContinue
+}
 
 $asm = [System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($OutputPath))
 Write-Host "[SUCCESS] PostInstall.exe derlendi ($((Get-Item $OutputPath).Length) bayt, EntryPoint: $($asm.EntryPoint.DeclaringType.FullName).$($asm.EntryPoint.Name))" -ForegroundColor Green

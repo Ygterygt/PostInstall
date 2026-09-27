@@ -1,0 +1,50 @@
+name: Release
+
+# Pushing a tag like v4.2.0 (or v4.2.0-beta.1 for a pre-release) runs the tests, builds the end-user zip
+# and publishes a GitHub Release with the matching CHANGELOG section as release notes.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test battery (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          .\Test-PostInstallSuite.ps1 -OutputPath "$env:RUNNER_TEMP\TestResults.json"
+          if ($LASTEXITCODE -ne 0) { throw "$LASTEXITCODE test(s) failed" }
+
+      - name: Build package
+        shell: powershell
+        run: .\Tools\New-ReleasePackage.ps1 -Tag "${{ github.ref_name }}" -OutputDir "$env:RUNNER_TEMP\dist"
+
+      - name: Release notes from CHANGELOG
+        shell: powershell
+        run: |
+          $version = ("${{ github.ref_name }}" -replace '^v', '') -replace '-.*$', ''
+          $lines = Get-Content CHANGELOG.md -Encoding UTF8
+          $start = [array]::FindIndex($lines, [Predicate[string]]{ param($l) $l.StartsWith("## [$version]") })   # -like would treat [..] as a wildcard
+          if ($start -lt 0) { throw "CHANGELOG.md icinde [$version] bolumu yok" }
+          $end = $lines.Count
+          for ($i = $start + 1; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^## \[|^\[\d') { $end = $i; break } }
+          $notes = ($lines[($start + 1)..($end - 1)] -join "`n").Trim()
+          $notes += "`n`n---`nKurulum ve kullanım: zip içindeki **KULLANIM.md**. Bütünlük kontrolü: ``.sha256`` dosyası."
+          [System.IO.File]::WriteAllText("$env:RUNNER_TEMP\notes.md", $notes, (New-Object System.Text.UTF8Encoding($false)))
+
+      - name: Publish GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $assets = @(Get-ChildItem "$env:RUNNER_TEMP\dist\*" | ForEach-Object FullName)
+          $prerelease = if ($tag -match '-') { @('--prerelease') } else { @() }
+          gh release create $tag @assets --title "Computer Maintenance Pro $tag" --notes-file "$env:RUNNER_TEMP\notes.md" @prerelease
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
