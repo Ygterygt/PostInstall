@@ -86,6 +86,8 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-21a | 🔴 | Uygulama kapatılırken "Bağımsız değişken türleri eşleşmiyor" hata diyaloğu (PS 5.1'de `@()` + `List[object]` binder hatası, FormClosing) | `.ToArray()` + kapanış adımları izole `try` + regresyon testi; kapanış diyalogsuz doğrulandı | ✅ Done |
 | CMP-22a | 🟠 | GPU veritabanındaki 7 winget kimliğinden 6'sı mevcut değildi (`0x8A150014`); doğrudan URL'lerin çoğu 404/403 ya da HTML sayfasıydı | Kimlikler `winget show` ile doğrulandı, kaynak (winget/msstore) alanı eklendi, AppX tespiti, sabit sürüm URL'leri yerine `ManualDownloadPage`, şema + eşleşme testleri | ✅ Done |
 | CMP-33 | 🟢 | GPU kartlarındaki 'Sürücüyü Yedekle' (119 paket / ~7 GB tek klasöre, geçmişsiz) kaldırıldı; sürücü güncellemeleri `Installers\` üzerinden resmi paketlerle (NVIDIA `-s -noreboot`, AMD `-install`) | Kullanıcı kararı; eski sürüme dönüş için Aygıt Yöneticisi 'Sürücüyü Geri Al' | ✅ Done |
+| CMP-34 | 🔵 | Uçtan uca test için izole ortam yoktu | `dev\New-TestVM.ps1` (Gen2, Secure Boot, vTPM, Guest Services) + `dev\Copy-SuiteToVM.ps1`; Hyper-V entegrasyon hizmeti adları yerelleştirildiği için kimlikle (GUID) bulunur; VM kuruldu, "Temiz Windows" denetim noktası alındı | ✅ Done |
+| CMP-35 | 🟠 | Tam sihirbaz (yönetici, tüm modüller, gerçek reboot/resume, NVIDIA/AMD sessiz kurulum, zamanlanmış görev, geri alma) gerçek sistemde doğrulanmadı | VM'de uçtan uca koşu, loglar incelendi, bulunan hatalar kartlandı | ⏸️ Blocked (host RAM yetersiz; VM hazır, paket kopyalandı) |
 | CMP-20a | 🟠 | PS 5.1'de `ConvertFrom-Json` diziyi tek nesne yayar; `$PSScriptRoot` betik `param()` varsayılanlarında boştur | İki tuzak da testlerle kilitlendi | ✅ Done |
 
 ### 🟢 Backlog — Özellikler (Sprint 3+)
@@ -103,7 +105,8 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-28 | ✅ **Done (Sprint 3)** — Güncellemeler sekmesi: `winget upgrade` tablosu sütun konumuna göre ayrıştırılır (dil bağımsız), seçili uygulamalar sırayla güncellenir, `config.Updates.ExcludeIds` ile hariç tutma | UniGetUI |
 | CMP-29 | `PostInstallUI.ps1` (1700 satır) sekme başına dosyalara bölünsün | — |
 | CMP-30 | TR/EN yerelleştirme kaynak dosyası | Sophia |
-| CMP-31 | Betik ve exe için kod imzalama | PSADT |
+| CMP-31 | ⬆️ **Öncelik yükseldi (dağıtım)** — Betik ve exe için kod imzalama (imzasız exe SmartScreen/antivirüs uyarısına takılır) | PSADT |
+| CMP-36 | ⬆️ **Dağıtım** — Sürüm paketi: `config.json`'dan sürüm, CHANGELOG, etiketle (tag) tetiklenen GitHub Actions release, test/docs/dev/Installers hariç zip, son kullanıcı README'si | — |
 
 ## 4. Sprint 1–2 Teslim Özeti (2026-09-27)
 
