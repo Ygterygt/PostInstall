@@ -13,6 +13,7 @@ Tek bir WinForms arayüzünden:
 - **Sistem Bakımı:** temp temizliği, Windows Update önbelleği, DISM, ağ sıfırlama, TRIM, pil raporu
 - **Kurulum Sihirbazı:** `steps.json`'daki 13 modülü sırayla çalıştırır; yeniden başlatmaya dayanıklıdır
 - **GPU & Sürücüler:** GPU'ya göre üretici yardımcı yazılımı önerir/kurar, sürücü yedekler
+- **Güncellemeler:** `winget upgrade` ile güncellemesi olan uygulamaları listeler, seçilenleri sırayla günceller
 - **Konsol & Loglar:** tüm olayların birleşik günlüğü
 
 Hedef ortam: **Windows PowerShell 5.1** (Windows'la gelen). PowerShell 7 hedef değildir ama kod orada da çalışmalıdır.
@@ -21,7 +22,7 @@ Hedef ortam: **Windows PowerShell 5.1** (Windows'la gelen). PowerShell 7 hedef d
 
 ```
 PostInstall.exe (Program.cs)        UAC ile yükseltir, konsolsuz powershell.exe başlatır
-  └─ PostInstallUI.ps1               WinForms arayüzü (5 sekme), tek örnek (mutex)
+  └─ PostInstallUI.ps1               WinForms arayüzü (6 sekme), tek örnek (mutex), -StartTab ile sekme seçilebilir
        ├─ PostInstallEngine.ps1      State machine: adımlar, retry, zaman aşımı, RunOnce ile reboot sonrası devam
        │    └─ steps.json → Modules\NN_*.ps1   Her modül AYRI bir powershell.exe sürecinde çalışır
        └─ Tools\*.ps1                Dot-source edilen yardımcı kütüphaneler
@@ -40,15 +41,16 @@ PostInstall.exe (Program.cs)        UAC ile yükseltir, konsolsuz powershell.exe
 
 | Dosya | Görev |
 | :--- | :--- |
-| `PostInstallUI.ps1` | Arayüz (~1800 satır). Bölgeler: Startup Trace, Single Instance Guard, Tab 1–5, Timers, Form Lifecycle |
+| `PostInstallUI.ps1` | Arayüz (~2000 satır). Bölgeler: Startup Trace, Single Instance Guard, Tab 1–6, Timers, Form Lifecycle |
 | `PostInstallEngine.ps1` | `Start-PostInstallProcess`, `Invoke-EngineStep`, `Invoke-StepProcess`, state ve RunOnce |
 | `steps.json` | Adım listesi: `Id, Order, Title, Description, Script, Critical, AllowRebootIfTriggered, RequiresReboot, TimeoutSeconds?, Retryable?` |
-| `config.json` | Yollar, reboot, retry, `Maintenance.*`, `Network.*` ayarları |
+| `config.json` | Yollar, reboot, retry, `Maintenance.*`, `Network.*`, `Updates.ExcludeIds` ayarları |
 | `gpu_compatibility.json` | GPU → yardımcı yazılım eşlemesi (`WinGetId` + `WinGetSource`, `AppxName`, `ManualDownloadPage`, `Note`) |
 | `Modules\00…12_*.ps1` | Kurulum adımları (sıra `steps.json`'daki `Order`'a göredir; `08_PostInstallAudit` en sondadır) |
 | `Tools\Common.ps1` | Ortak: `Get-SuiteRoot`, `Get-SuiteConfig`, `Get-SuiteDataDir`, RAM hız normalizasyonu, REG_EXPAND_SZ-güvenli PATH |
 | `Tools\PackageEngine.ps1` | `Install-ResilientPackage` (WinGet → imzalı CDN → yerel önbellek), GPU yardımcıları (`Find-GpuProfile`, `Install-GpuCompanionApp`) |
 | `Tools\MaintenanceEngine.ps1` | Temizlik/DISM/ağ/TRIM/pil fonksiyonları |
+| `Tools\UpdateEngine.ps1` | `Get-AvailableAppUpdates`, `Update-AppPackage`, `ConvertFrom-WingetTable` (winget tablosunu **sütun konumuna göre** ayrıştırır; başlıklar yerelleştirilmiş olabilir) |
 | `Tools\HardwareMonitorEngine.ps1` | Telemetri örneği (`Get-LiveTelemetrySample`) |
 | `Tools\SilentDetector.ps1` | Yükleyici türü + sessiz parametre tespiti, "zaten kurulu mu" kontrolü |
 | `Tools\SnapshotEngine.ps1`, `DriverEngine.ps1`, `ReportingEngine.ps1`, `SystemSpecsCollector.ps1` | Geri yükleme noktası, sürücü yedek/enjeksiyon, HTML rapor, donanım profili |
@@ -137,6 +139,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\Build-Launcher.ps1
 13. **PowerShell `-eq` tip dönüşümü:** `$true -eq "REBOOT"` → `True`. Adım sonuçları string'dir
     (`SUCCESS/WARNING/FAILED/REBOOT`); bool ile karıştırmayın.
 14. **.NET regex yerine koymada `$_`** "tüm girdi" demektir; `-replace` ile PowerShell kodu üretirken dikkat edin.
+15. **Otomatik değişkenler:** `$args`, `$matches`, `$profile`, `$input` gibi adlara atama yapmayın
+    (PSScriptAnalyzer da uyarır; CI analiz adımında `Error` seviyesi build'i düşürür).
+16. **`winget upgrade`'in JSON çıktısı yok;** tablo metni ayrıştırılır. Başlık metnine göre değil,
+    sütun **konumlarına** göre çalışın (başlıklar Türkçe/İngilizce olabilir).
 
 ## 8. Bilinen sınırlamalar
 

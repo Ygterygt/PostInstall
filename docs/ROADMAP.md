@@ -99,7 +99,7 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-25 | Her tweak için geri alma (undo) ve "önceki değer" kaydı | Win11Debloat, Sophia |
 | CMP-26 | ASR kuralları (audit modu), Defender PUA koruması | Harden-Windows-Security |
 | CMP-27 | Telemetri geçmişi (CSV) + raporda trend grafikleri, sağlık skoru | UniGetUI / LHM |
-| CMP-28 | Güncellenebilir uygulamalar sekmesi (`winget upgrade` listesi, toplu güncelle) | UniGetUI |
+| CMP-28 | ✅ **Done (Sprint 3)** — Güncellemeler sekmesi: `winget upgrade` tablosu sütun konumuna göre ayrıştırılır (dil bağımsız), seçili uygulamalar sırayla güncellenir, `config.Updates.ExcludeIds` ile hariç tutma | UniGetUI |
 | CMP-29 | `PostInstallUI.ps1` (1700 satır) sekme başına dosyalara bölünsün | — |
 | CMP-30 | TR/EN yerelleştirme kaynak dosyası | Sophia |
 | CMP-31 | Betik ve exe için kod imzalama | PSADT |

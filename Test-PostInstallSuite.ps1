@@ -157,6 +157,36 @@ Invoke-SuiteTest -Category "Configuration" -Name "gpu_compatibility.json Schema"
     "NVIDIA ($($gpuJson.Vendors.NVIDIA.Profiles.Count)), AMD ($($gpuJson.Vendors.AMD.Profiles.Count)), Intel ($($gpuJson.Vendors.Intel.Profiles.Count)); sources valid"
 }
 
+Invoke-SuiteTest -Category "Unit" -Name "ConvertFrom-WingetTable (EN/TR, truncation, empty)" -Body {
+    . (Join-Path $Root "Tools\UpdateEngine.ps1")
+    $en = @(
+        "   - \ |",
+        "Name                                    Id                   Version   Available Source",
+        "---------------------------------------------------------------------------------------",
+        "Microsoft Teams                         Microsoft.Teams      26183.1   26198.3   winget",
+        "Python Launcher                         Python.Launcher      3.12.10   3.14.7    winget",
+        "2 upgrades available."
+    )
+    $r = @(ConvertFrom-WingetTable -Lines $en)
+    Assert-True ($r.Count -eq 2) "EN row count $($r.Count)"
+    Assert-True ($r[1].Id -eq "Python.Launcher" -and $r[1].Available -eq "3.14.7" -and $r[1].Source -eq "winget") "EN columns"
+
+    $tr = @(
+        "Ad                              Kimlik              Sürüm   Kullanılabilir Kaynak",
+        "---------------------------------------------------------------------------------",
+        "Çok Uzun Bir Uygulama Adı Bura$([char]0x2026) Vendor.LongApp      1.2.3   1.3.0          winget",
+        "Kısa                            Short.App           10.0    10.1           msstore",
+        "2 yükseltme kullanılabilir."
+    )
+    $t = @(ConvertFrom-WingetTable -Lines $tr)
+    Assert-True ($t.Count -eq 2 -and $t[0].Id -eq "Vendor.LongApp" -and $t[1].Source -eq "msstore") "TR columns"
+    Assert-True (-not $t[0].Name.EndsWith([string][char]0x2026)) "ellipsis trimmed"
+
+    $none = @(ConvertFrom-WingetTable -Lines @("No installed package found matching input criteria."))
+    Assert-True ($none.Count -eq 0) "no-update output"
+    "EN + TR headers parsed by position; empty output handled"
+}
+
 Invoke-SuiteTest -Category "Unit" -Name "Find-GpuProfile matching" -Body {
     . (Join-Path $Root "Tools\PackageEngine.ps1")
     $gpuJson = Get-Content -Path (Join-Path $Root "gpu_compatibility.json") -Raw -Encoding UTF8 | ConvertFrom-Json
