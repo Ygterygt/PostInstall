@@ -75,7 +75,7 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-14 | 🟠 | Motor: modül çıktısı adım bitince toplu geliyor, `AllowRebootIfTriggered`/`MaxRetriesPerStep`/adım zaman aşımı yok sayılıyor, zaman aşımında alt süreçler öksüz kalıyor, Türkçe karakter bozuluyor | Canlı akış (UTF-8), ertelenmiş reboot, retry, süreç ağacı sonlandırma | ✅ Done |
 | CMP-15 | 🟢 | Dizüstünde de Yüksek Performans planı aktif ediliyor (pil) | Laptop → Dengeli, masaüstü → Yüksek Perf (varsa) | ✅ Done |
 | CMP-16 | 🔵 | Test bataryası gerçek sistemde temp siliyor, sabit yol kullanıyor, çıkış kodu vermiyor; `TestResults.json`/`Backups` git'te; exe için build script yok | Sandbox testler, birim testler, `.gitignore`, `Tools\Build-Launcher.ps1` | ✅ Done |
-| CMP-17 | 🔵 | CI yok | GitHub Actions: PSScriptAnalyzer + test bataryası (windows-latest) | 🔎 Review/Test |
+| CMP-17 | 🔵 | CI yok | GitHub Actions: PSScriptAnalyzer + test bataryası (windows-latest) | ✅ Done |
 
 ### 🐞 Çalışma sırasında keşfedilen kartlar (Sprint 1–2)
 
@@ -106,7 +106,7 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 
 ## 4. Sprint 1–2 Teslim Özeti (2026-09-27)
 
-- 19 kart **Done**, 1 kart **Review/Test** (CMP-17: CI dosyası hazır, GitHub'a push sonrası ilk koşuda doğrulanacak).
+- 20 kart **Done** (CMP-17: CI GitHub'da yeşil; ilk koşular PSScriptAnalyzer'ın bir yanlış alarmı yüzünden düşüyordu, düzeltildi).
 - Test bataryası: **47/47 PASS** (Windows PowerShell 5.1). Yeni kapsam: birim testleri, temp temizliği sandbox'ı, motorun uçtan uca testi (retry, atlama, ertelenmiş reboot, watchdog, UTF-8, resume, dot-source regresyonu).
 - Davranış değişiklikleri (config ile geri alınabilir): log/state `%ProgramData%\ComputerMaintenancePro`'ya taşındı · Geri Dönüşüm Kutusu varsayılan olarak boşaltılmaz · `DismResetBase` varsayılanı `false` · `MaxRetriesPerStep` 1 · dizüstünde Dengeli güç planı · DNS yalnızca DHCP adaptörlerinde ve domain dışı makinelerde değişir.
 
