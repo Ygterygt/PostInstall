@@ -44,7 +44,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.ref_name }}"
-          $assets = @(Get-ChildItem "$env:RUNNER_TEMP\dist\*" | ForEach-Object FullName)
-          $prerelease = if ($tag -match '-') { @('--prerelease') } else { @() }
-          gh release create $tag @assets --title "Computer Maintenance Pro $tag" --notes-file "$env:RUNNER_TEMP\notes.md" @prerelease
+          # One explicit argument list: PS 5.1 mangles splatting a single-string "array" into a native command
+          $ghArgs = [System.Collections.Generic.List[string]]::new()
+          $ghArgs.AddRange([string[]]@('release', 'create', $tag))
+          Get-ChildItem "$env:RUNNER_TEMP\dist" -File | ForEach-Object { $ghArgs.Add($_.FullName) }
+          $ghArgs.AddRange([string[]]@('--title', "Computer Maintenance Pro $tag", '--notes-file', "$env:RUNNER_TEMP\notes.md"))
+          if ($tag -match '-') { $ghArgs.Add('--prerelease') }
+          Write-Host "gh $($ghArgs -join ' ')"
+          & gh $ghArgs.ToArray()
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
           if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
