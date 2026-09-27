@@ -10,7 +10,7 @@ Windows 10/11 için **kurulum sonrası (post-install) hazırlık + sistem bakım
 Tek bir WinForms arayüzünden:
 
 - **Canlı İzleme:** CPU/GPU/RAM/disk/pil telemetrisi (2 sn'de bir)
-- **Sistem Bakımı:** temp temizliği, Windows Update önbelleği, DISM, ağ sıfırlama, TRIM, pil raporu
+- **Sistem Bakımı:** temp temizliği, Windows Update önbelleği, DISM, ağ sıfırlama, TRIM, pil raporu; haftalık **zamanlanmış bakım** (Görev Zamanlayıcı)
 - **Kurulum Sihirbazı:** `steps.json`'daki 13 modülü sırayla çalıştırır; yeniden başlatmaya dayanıklıdır
 - **GPU & Sürücüler:** GPU'ya göre üretici yardımcı yazılımı önerir/kurar, sürücü yedekler
 - **Güncellemeler:** `winget upgrade` ile güncellemesi olan uygulamaları listeler, seçilenleri sırayla günceller
@@ -51,6 +51,8 @@ PostInstall.exe (Program.cs)        UAC ile yükseltir, konsolsuz powershell.exe
 | `Tools\PackageEngine.ps1` | `Install-ResilientPackage` (WinGet → imzalı CDN → yerel önbellek), GPU yardımcıları (`Find-GpuProfile`, `Install-GpuCompanionApp`) |
 | `Tools\MaintenanceEngine.ps1` | Temizlik/DISM/ağ/TRIM/pil fonksiyonları |
 | `Tools\UpdateEngine.ps1` | `Get-AvailableAppUpdates`, `Update-AppPackage`, `ConvertFrom-WingetTable` (winget tablosunu **sütun konumuna göre** ayrıştırır; başlıklar yerelleştirilmiş olabilir) |
+| `Tools\SchedulerEngine.ps1` | Zamanlanmış bakım ayarları (varsayılan `config.ScheduledMaintenance` ← kullanıcı seçimi `State\ScheduledMaintenance.json`), görev kaydı/durumu (`\ComputerMaintenancePro\` klasörü) |
+| `Tools\Invoke-ScheduledMaintenance.ps1` | Görevin çalıştırdığı betik; `-DryRun` yalnızca planı yazar. Log: `Logs\ScheduledMaintenance.log`, özet: `Reports\LastScheduledMaintenance.json` |
 | `Tools\HardwareMonitorEngine.ps1` | Telemetri örneği (`Get-LiveTelemetrySample`) |
 | `Tools\SilentDetector.ps1` | Yükleyici türü + sessiz parametre tespiti, "zaten kurulu mu" kontrolü |
 | `Tools\SnapshotEngine.ps1`, `DriverEngine.ps1`, `ReportingEngine.ps1`, `SystemSpecsCollector.ps1` | Geri yükleme noktası, sürücü yedek/enjeksiyon, HTML rapor, donanım profili |
@@ -70,6 +72,7 @@ Hepsi `%ProgramData%\ComputerMaintenancePro\` altındadır (repo içinde **deği
 | `State\PostInstall_State.json` | Motor state'i (oturum, adım sonuçları, seçili adımlar) |
 | `State\OfflineSelection.json` | Sihirbaz sayfa 3'te seçilen yükleyiciler (modül 10 okur) |
 | `State\UI.pid` | Tek örnek kilidini tutan UI sürecinin PID'i |
+| `State\ScheduledMaintenance.json` | Zamanlanmış bakım için kullanıcı seçimleri (repo'daki `config.json` değiştirilmez) |
 | `Backups\`, `Reports\`, `EventLogArchive\` | Registry/ortam/DNS/sürücü yedekleri, raporlar, arşivlenen olay günlükleri |
 
 ## 5. Test ve doğrulama

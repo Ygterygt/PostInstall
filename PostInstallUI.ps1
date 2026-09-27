@@ -134,6 +134,7 @@ $Script:SnapshotPath    = Join-Path $Script:UIRoot "Tools\SnapshotEngine.ps1"
 $Script:DriverEnginePath = Join-Path $Script:UIRoot "Tools\DriverEngine.ps1"
 $Script:PackageEnginePath = Join-Path $Script:UIRoot "Tools\PackageEngine.ps1"
 $Script:MaintEnginePath = Join-Path $Script:UIRoot "Tools\MaintenanceEngine.ps1"
+$Script:SchedulerEnginePath = Join-Path $Script:UIRoot "Tools\SchedulerEngine.ps1"
 $Script:HwMonEnginePath = Join-Path $Script:UIRoot "Tools\HardwareMonitorEngine.ps1"
 $Script:UpdateEnginePath = Join-Path $Script:UIRoot "Tools\UpdateEngine.ps1"
 $Script:GpuDbPath       = Join-Path $Script:UIRoot "gpu_compatibility.json"
@@ -150,6 +151,7 @@ if (Test-Path $Script:SnapshotPath)     { . $Script:SnapshotPath }
 if (Test-Path $Script:DriverEnginePath) { . $Script:DriverEnginePath }
 if (Test-Path $Script:PackageEnginePath){ . $Script:PackageEnginePath }
 if (Test-Path $Script:MaintEnginePath)  { . $Script:MaintEnginePath }
+if (Test-Path $Script:SchedulerEnginePath) { . $Script:SchedulerEnginePath }
 if (Test-Path $Script:HwMonEnginePath)  { . $Script:HwMonEnginePath }
 
 # Load GPU Database
@@ -517,6 +519,170 @@ $splMaint.Orientation  = [System.Windows.Forms.Orientation]::Horizontal
 $splMaint.SplitterDistance = 290
 $splMaint.BackColor    = $Theme.Border
 $pnlTabMaint.Controls.Add($splMaint)
+
+# Scheduled maintenance strip (CMP-23): weekly unattended run via Task Scheduler
+$Script:SchedDays = [ordered]@{ Monday = "Pazartesi"; Tuesday = "Salı"; Wednesday = "Çarşamba"; Thursday = "Perşembe"; Friday = "Cuma"; Saturday = "Cumartesi"; Sunday = "Pazar" }
+$Script:SchedStatusLoaded = $false
+
+$pnlSched = New-Object System.Windows.Forms.Panel
+$pnlSched.Dock      = [System.Windows.Forms.DockStyle]::Top
+$pnlSched.Height    = 76
+$pnlSched.BackColor = $Theme.BgCard
+$pnlSched.Padding   = New-Object System.Windows.Forms.Padding(10, 6, 10, 4)
+
+$flpSched = New-Object System.Windows.Forms.FlowLayoutPanel
+$flpSched.Dock         = [System.Windows.Forms.DockStyle]::Top
+$flpSched.Height       = 38
+$flpSched.WrapContents = $false
+$flpSched.BackColor    = [System.Drawing.Color]::Transparent
+
+function New-SchedLabel { param([string]$Text, [System.Drawing.Color]$Color)
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $Text; $l.AutoSize = $true; $l.ForeColor = $Color; $l.Font = $Theme.FontCardHdr
+    $l.Margin = New-Object System.Windows.Forms.Padding(0, 8, 8, 0); $l.UseMnemonic = $false
+    return $l
+}
+function New-SchedCheck { param([string]$Text)
+    $c = New-Object System.Windows.Forms.CheckBox
+    $c.Text = $Text; $c.AutoSize = $true; $c.ForeColor = $Theme.TextPrimary; $c.Font = $Theme.FontSub
+    $c.Margin = New-Object System.Windows.Forms.Padding(0, 8, 10, 0)
+    return $c
+}
+function New-SchedButton { param([string]$Text, [int]$Width, [System.Drawing.Color]$Bg)
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $Text; $b.Size = New-Object System.Drawing.Size($Width, 28); $b.Font = $Theme.FontButton
+    $b.BackColor = $Bg; $b.ForeColor = [System.Drawing.Color]::White; $b.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $b.FlatAppearance.BorderColor = $Theme.Border; $b.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $b.Margin = New-Object System.Windows.Forms.Padding(0, 3, 6, 0)
+    return $b
+}
+
+$chkSchedTemp = New-SchedCheck "Temp"
+$chkSchedDns  = New-SchedCheck "DNS"
+$chkSchedTrim = New-SchedCheck "TRIM"
+$chkSchedUpd  = New-SchedCheck "Uygulama güncellemeleri"
+
+$cmbSchedDay = New-Object System.Windows.Forms.ComboBox
+$cmbSchedDay.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+$cmbSchedDay.Width = 105
+$cmbSchedDay.Margin = New-Object System.Windows.Forms.Padding(4, 5, 6, 0)
+foreach ($d in $Script:SchedDays.Values) { [void]$cmbSchedDay.Items.Add($d) }
+
+$dtpSchedTime = New-Object System.Windows.Forms.DateTimePicker
+$dtpSchedTime.Format       = [System.Windows.Forms.DateTimePickerFormat]::Custom
+$dtpSchedTime.CustomFormat = "HH:mm"
+$dtpSchedTime.ShowUpDown   = $true
+$dtpSchedTime.Width        = 70
+$dtpSchedTime.Margin       = New-Object System.Windows.Forms.Padding(0, 5, 10, 0)
+
+$btnSchedSave   = New-SchedButton "Kaydet ve Etkinleştir" 160 $Theme.AccentGreen
+$btnSchedRun    = New-SchedButton "Şimdi Çalıştır" 110 $Theme.AccentBlue
+$btnSchedRemove = New-SchedButton "Kaldır" 70 $Theme.BgInput
+
+$flpSched.Controls.AddRange(@(
+    (New-SchedLabel "⏰ Zamanlanmış Bakım" $Theme.AccentAmber),
+    $chkSchedTemp, $chkSchedDns, $chkSchedTrim, $chkSchedUpd,
+    (New-SchedLabel "Her" $Theme.TextMuted), $cmbSchedDay, $dtpSchedTime
+))
+
+# Second row: status text (left) + action buttons (right)
+$flpSchedBtns = New-Object System.Windows.Forms.FlowLayoutPanel
+$flpSchedBtns.Dock          = [System.Windows.Forms.DockStyle]::Right
+$flpSchedBtns.Width         = 370
+$flpSchedBtns.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+$flpSchedBtns.WrapContents  = $false
+$flpSchedBtns.BackColor     = [System.Drawing.Color]::Transparent
+$flpSchedBtns.Controls.AddRange(@($btnSchedRemove, $btnSchedRun, $btnSchedSave))
+
+$lblSchedStatus = New-Object System.Windows.Forms.Label
+$lblSchedStatus.Dock        = [System.Windows.Forms.DockStyle]::Fill
+$lblSchedStatus.Font        = $Theme.FontSub
+$lblSchedStatus.ForeColor   = $Theme.TextMuted
+$lblSchedStatus.TextAlign   = [System.Drawing.ContentAlignment]::MiddleLeft
+$lblSchedStatus.UseMnemonic = $false
+$lblSchedStatus.Text        = "Durum yükleniyor..."
+
+$pnlSched.Controls.Add($lblSchedStatus)
+$pnlSched.Controls.Add($flpSchedBtns)
+$pnlSched.Controls.Add($flpSched)
+$lblSchedStatus.BringToFront()
+$pnlTabMaint.Controls.Add($pnlSched)
+$splMaint.BringToFront()   # Fill must be front-most (AGENTS.md pitfall 7)
+
+function Get-SchedSettingsFromUi {
+    $s = Get-ScheduledMaintenanceSettings
+    $s.CleanTemp  = $chkSchedTemp.Checked
+    $s.FlushDns   = $chkSchedDns.Checked
+    $s.ReTrim     = $chkSchedTrim.Checked
+    $s.UpdateApps = $chkSchedUpd.Checked
+    $s.DayOfWeek  = @($Script:SchedDays.Keys)[$cmbSchedDay.SelectedIndex]
+    $s.Time       = $dtpSchedTime.Value.ToString("HH:mm")
+    return $s
+}
+
+function Update-SchedPanel {
+    try {
+        $s = Get-ScheduledMaintenanceSettings
+        $chkSchedTemp.Checked = [bool]$s.CleanTemp
+        $chkSchedDns.Checked  = [bool]$s.FlushDns
+        $chkSchedTrim.Checked = [bool]$s.ReTrim
+        $chkSchedUpd.Checked  = [bool]$s.UpdateApps
+        $cmbSchedDay.SelectedIndex = [Math]::Max(0, @($Script:SchedDays.Keys).IndexOf($s.DayOfWeek))
+        $hm = $s.Time -split ":"
+        $dtpSchedTime.Value = (Get-Date).Date.AddHours([int]$hm[0]).AddMinutes([int]$hm[1])
+
+        $st = Get-MaintenanceTaskStatus -TaskName $s.TaskName
+        if (-not $st.Registered) {
+            $lblSchedStatus.ForeColor = $Theme.TextMuted
+            $lblSchedStatus.Text = "Kapalı. İşlemleri ve zamanı seçip etkinleştirin (pildeyken çalışmaz; kaçırılırsa ilk fırsatta çalışır)."
+        } else {
+            $next = if ($st.NextRunTime) { $st.NextRunTime.ToString("dd.MM.yyyy HH:mm") } else { "-" }
+            $last = if ($st.LastRunTime) {
+                        $ok = if ($st.LastTaskResult -eq 0) { "başarılı" } else { "sonuç kodu $($st.LastTaskResult)" }
+                        "$($st.LastRunTime.ToString('dd.MM.yyyy HH:mm')) ($ok)"
+                    } else { "henüz çalışmadı" }
+            $lblSchedStatus.ForeColor = $Theme.AccentGreen
+            $lblSchedStatus.Text = "Etkin • Sonraki: $next • Son: $last • Log: ProgramData\ComputerMaintenancePro\Logs\ScheduledMaintenance.log"
+        }
+    } catch {
+        $lblSchedStatus.ForeColor = $Theme.AccentAmber
+        $lblSchedStatus.Text = "Zamanlanmış bakım durumu okunamadı: $($_.Exception.Message)"
+    }
+}
+
+$btnSchedSave.Add_Click({
+    try {
+        $s = Get-SchedSettingsFromUi
+        Save-ScheduledMaintenanceSettings -Settings $s
+        Register-MaintenanceTask -Settings $s | Out-Null
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] Zamanlanmış bakım etkinleştirildi: her $($Script:SchedDays[$s.DayOfWeek]) $($s.Time).`r`n")
+    } catch {
+        $hint = if ($_.Exception.Message -match "Access is denied|Erişim engellendi|0x80070005") { " (Yönetici olarak açın: PostInstall.exe)" } else { "" }
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Zamanlanmış bakım kaydedilemedi: $($_.Exception.Message)$hint`r`n")
+    }
+    Update-SchedPanel
+})
+
+$btnSchedRun.Add_Click({
+    try {
+        Start-MaintenanceTaskNow
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] Zamanlanmış bakım görevi şimdi başlatıldı (arka planda çalışır, sonuç logda).`r`n")
+    } catch {
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Görev başlatılamadı (önce 'Kaydet ve Etkinleştir'): $($_.Exception.Message)`r`n")
+    }
+    Update-SchedPanel
+})
+
+$btnSchedRemove.Add_Click({
+    try {
+        $removed = Unregister-MaintenanceTask
+        $msg = if ($removed) { "[SUCCESS] Zamanlanmış bakım kaldırıldı." } else { "Kayıtlı zamanlanmış bakım yok." }
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] $msg`r`n")
+    } catch {
+        $rtbMaintLog.AppendText("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Görev kaldırılamadı: $($_.Exception.Message)`r`n")
+    }
+    Update-SchedPanel
+})
 
 # Action Buttons Table Layout
 $tlpMaintActions = New-Object System.Windows.Forms.TableLayoutPanel
@@ -1358,7 +1524,10 @@ function Switch-AppTab {
 
     switch ($TabName) {
         "Monitoring"  { $pnlTabMon.BringToFront() }
-        "Maintenance" { $pnlTabMaint.BringToFront() }
+        "Maintenance" {
+            $pnlTabMaint.BringToFront()
+            if (-not $Script:SchedStatusLoaded) { $Script:SchedStatusLoaded = $true; Update-SchedPanel }
+        }
         "Wizard"      { $pnlTabWizard.BringToFront() }
         "GpuCenter"   {
             $pnlTabGpu.BringToFront()

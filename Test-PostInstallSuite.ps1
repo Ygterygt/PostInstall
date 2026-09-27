@@ -187,6 +187,39 @@ Invoke-SuiteTest -Category "Unit" -Name "ConvertFrom-WingetTable (EN/TR, truncat
     "EN + TR headers parsed by position; empty output handled"
 }
 
+Invoke-SuiteTest -Category "Unit" -Name "SchedulerEngine (settings, validation, task definition, dry run)" -Body {
+    . (Join-Path $Root "Tools\SchedulerEngine.ps1")
+    $sb = New-Sandbox "Sched"
+    try {
+        $path = Join-Path $sb "ScheduledMaintenance.json"
+        $s = Get-ScheduledMaintenanceSettings -Path $path
+        Assert-True ($s.CleanTemp -and -not $s.UpdateApps) "defaults"
+        $s.DayOfWeek = "Wednesday"; $s.Time = "19:30"; $s.UpdateApps = $true
+        Save-ScheduledMaintenanceSettings -Settings $s -Path $path
+        $r = Get-ScheduledMaintenanceSettings -Path $path
+        Assert-True ($r.DayOfWeek -eq "Wednesday" -and $r.Time -eq "19:30" -and $r.UpdateApps) "roundtrip"
+
+        $bad = [PSCustomObject]@{ DayOfWeek = "Sunday"; Time = "25:00"; CleanTemp = $true; FlushDns = $false; ReTrim = $false; UpdateApps = $false }
+        $rejected = $false; try { Assert-ScheduledMaintenanceSettings $bad } catch { $rejected = $true }
+        Assert-True $rejected "invalid time rejected"
+        $none = [PSCustomObject]@{ DayOfWeek = "Sunday"; Time = "10:00"; CleanTemp = $false; FlushDns = $false; ReTrim = $false; UpdateApps = $false }
+        $rejected = $false; try { Assert-ScheduledMaintenanceSettings $none } catch { $rejected = $true }
+        Assert-True $rejected "no action rejected"
+
+        $def = New-MaintenanceTaskDefinition -Settings $r
+        # Regression: PS 5.1 stores UTC ("...Z") which drifts across DST; boundary must be local
+        Assert-True ($def.Trigger.StartBoundary -match 'T19:30:00$') "local StartBoundary (got $($def.Trigger.StartBoundary))"
+        Assert-True ($def.Settings.DisallowStartIfOnBatteries -and $def.Settings.StartWhenAvailable) "battery/catch-up settings"
+        Assert-True ($def.Action.Arguments -like "*Invoke-ScheduledMaintenance.ps1*") "runner path"
+
+        $out = & $WinPS -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "Tools\Invoke-ScheduledMaintenance.ps1") -DryRun -SettingsPath $path 2>&1 | Out-String
+        Assert-True ($out -match "PLAN=CleanTemp,FlushDns,ReTrim,UpdateApps") "dry-run plan: $out"
+        "settings roundtrip, validation, local trigger, battery-safe settings, dry-run plan OK"
+    } finally {
+        Remove-Item $sb -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Invoke-SuiteTest -Category "Unit" -Name "Find-GpuProfile matching" -Body {
     . (Join-Path $Root "Tools\PackageEngine.ps1")
     $gpuJson = Get-Content -Path (Join-Path $Root "gpu_compatibility.json") -Raw -Encoding UTF8 | ConvertFrom-Json

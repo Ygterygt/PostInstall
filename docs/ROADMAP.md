@@ -94,7 +94,7 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-20 | Paket listesini `packages.json` kataloğuna taşı, sihirbazda uygulama bazlı seçim | winutil |
 | CMP-21 | Sabit sürümlü CDN URL'leri yerine Evergreen ile güncel URL | evergreen |
 | CMP-22 | LibreHardwareMonitorLib ile gerçek sensörler (CPU paket sıcaklığı, fan, güç) | LibreHardwareMonitor |
-| CMP-23 | Zamanlanmış bakım + günlük uygulama güncellemesi (Task Scheduler, allow/block list) | Winget-AutoUpdate |
+| CMP-23 | ✅ **Done (Sprint 3)** — Bakım sekmesinde "Zamanlanmış Bakım" paneli: haftalık Görev Zamanlayıcı görevi (kullanıcı adına, en yüksek yetki), Temp/DNS/TRIM/uygulama güncellemeleri, pildeyken çalışmaz, kaçırılırsa ilk fırsatta çalışır, sihirbaz çalışırken atlanır | Winget-AutoUpdate |
 | CMP-24 | Windows Update kurulumu (yalnız tarama değil) + sürücü güncellemeleri | PSWindowsUpdate |
 | CMP-25 | Her tweak için geri alma (undo) ve "önceki değer" kaydı | Win11Debloat, Sophia |
 | CMP-26 | ASR kuralları (audit modu), Defender PUA koruması | Harden-Windows-Security |
