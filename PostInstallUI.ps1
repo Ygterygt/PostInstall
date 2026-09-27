@@ -131,7 +131,6 @@ $Script:EnginePath      = Join-Path $Script:UIRoot "PostInstallEngine.ps1"
 $Script:DetectorPath    = Join-Path $Script:UIRoot "Tools\SilentDetector.ps1"
 $Script:SpecsPath       = Join-Path $Script:UIRoot "Tools\SystemSpecsCollector.ps1"
 $Script:SnapshotPath    = Join-Path $Script:UIRoot "Tools\SnapshotEngine.ps1"
-$Script:DriverEnginePath = Join-Path $Script:UIRoot "Tools\DriverEngine.ps1"
 $Script:PackageEnginePath = Join-Path $Script:UIRoot "Tools\PackageEngine.ps1"
 $Script:MaintEnginePath = Join-Path $Script:UIRoot "Tools\MaintenanceEngine.ps1"
 $Script:SchedulerEnginePath = Join-Path $Script:UIRoot "Tools\SchedulerEngine.ps1"
@@ -148,7 +147,6 @@ if (-not (Test-Path $Script:EnginePath)) {
 if (Test-Path $Script:DetectorPath)     { . $Script:DetectorPath }
 if (Test-Path $Script:SpecsPath)        { . $Script:SpecsPath }
 if (Test-Path $Script:SnapshotPath)     { . $Script:SnapshotPath }
-if (Test-Path $Script:DriverEnginePath) { . $Script:DriverEnginePath }
 if (Test-Path $Script:PackageEnginePath){ . $Script:PackageEnginePath }
 if (Test-Path $Script:MaintEnginePath)  { . $Script:MaintEnginePath }
 if (Test-Path $Script:SchedulerEnginePath) { . $Script:SchedulerEnginePath }
@@ -1878,17 +1876,6 @@ function Update-GpuCenterCard {
         $btnInstallGpu.Cursor    = [System.Windows.Forms.Cursors]::Hand
         $btnRow.Controls.Add($btnInstallGpu)
 
-        $btnExportDrv = New-Object System.Windows.Forms.Button
-        $btnExportDrv.Text      = "⚡ Sürücüyü Yedekle"
-        $btnExportDrv.Font      = $Theme.FontButton
-        $btnExportDrv.Dock      = [System.Windows.Forms.DockStyle]::Right
-        $btnExportDrv.Width     = 160
-        $btnExportDrv.BackColor = $Theme.BgInput
-        $btnExportDrv.ForeColor = $Theme.TextPrimary
-        $btnExportDrv.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-        $btnExportDrv.FlatAppearance.BorderColor = $Theme.Border
-        $btnExportDrv.Cursor    = [System.Windows.Forms.Cursors]::Hand
-        $btnRow.Controls.Add($btnExportDrv)
 
         # Proper WinForms dock stack order: Fill first, Bottom next, Top last
         $card.Controls.Add($lblDetails)
@@ -1932,25 +1919,6 @@ function Update-GpuCenterCard {
             } -ArgumentList @($info.Profile, $info.App, $Script:GpuMsgQueue, $Script:PackageEnginePath, $Script:GpuDoneMarker) | Out-Null
         })
 
-        $btnExportDrv.Add_Click({
-            $this.Enabled = $false
-            Write-GpuLog "Sistem sürücüleri %ProgramData%\ComputerMaintenancePro\Backups\Drivers klasörüne yedekleniyor..."
-            Start-ScriptBlockAsync -Track -ScriptBlock {
-                param($path, $q, $doneMarker)
-                try {
-                    if (Test-Path $path) { . $path }
-                    $res = Export-SystemDrivers
-                    if ($res.Success) {
-                        $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [SUCCESS] $($res.ExportedCount) sürücü yedeklendi: $($res.Destination)")
-                    } else {
-                        $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Sürücü yedekleme başarısız: $($res.ErrorMessage)")
-                    }
-                } catch {
-                    $q.Enqueue("[$((Get-Date).ToString('HH:mm:ss'))] [ERROR] Sürücü yedekleme hatası: $($_.Exception.Message)")
-                }
-                $q.Enqueue($doneMarker)
-            } -ArgumentList @($Script:DriverEnginePath, $Script:GpuMsgQueue, $Script:GpuDoneMarker) | Out-Null
-        })
 
         $flpGpuCards.Controls.Add($card)
     }

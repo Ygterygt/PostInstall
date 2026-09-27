@@ -85,6 +85,7 @@ Güçlü yanlar: adım bazlı state machine + atomik state yazımı, 3 katmanlı
 | CMP-19 | 🔴 | Motorun `param([switch]$Resume)` bloğu dot-source edilince UI'ın `$Resume`'unu `$false` yapıyor → reboot sonrası GUI kuruluma **hiç** otomatik devam etmiyordu | CLI parametreleri alias ile yeniden adlandırıldı (`-Resume` CLI'da aynen çalışır) + regresyon testi | ✅ Done |
 | CMP-21a | 🔴 | Uygulama kapatılırken "Bağımsız değişken türleri eşleşmiyor" hata diyaloğu (PS 5.1'de `@()` + `List[object]` binder hatası, FormClosing) | `.ToArray()` + kapanış adımları izole `try` + regresyon testi; kapanış diyalogsuz doğrulandı | ✅ Done |
 | CMP-22a | 🟠 | GPU veritabanındaki 7 winget kimliğinden 6'sı mevcut değildi (`0x8A150014`); doğrudan URL'lerin çoğu 404/403 ya da HTML sayfasıydı | Kimlikler `winget show` ile doğrulandı, kaynak (winget/msstore) alanı eklendi, AppX tespiti, sabit sürüm URL'leri yerine `ManualDownloadPage`, şema + eşleşme testleri | ✅ Done |
+| CMP-33 | 🟢 | GPU kartlarındaki 'Sürücüyü Yedekle' (119 paket / ~7 GB tek klasöre, geçmişsiz) kaldırıldı; sürücü güncellemeleri `Installers\` üzerinden resmi paketlerle (NVIDIA `-s -noreboot`, AMD `-install`) | Kullanıcı kararı; eski sürüme dönüş için Aygıt Yöneticisi 'Sürücüyü Geri Al' | ✅ Done |
 | CMP-20a | 🟠 | PS 5.1'de `ConvertFrom-Json` diziyi tek nesne yayar; `$PSScriptRoot` betik `param()` varsayılanlarında boştur | İki tuzak da testlerle kilitlendi | ✅ Done |
 
 ### 🟢 Backlog — Özellikler (Sprint 3+)

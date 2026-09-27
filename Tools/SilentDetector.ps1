@@ -79,6 +79,20 @@ function Get-InstallerSignature {
             }
         }
 
+        # AMD Software: Adrenalin Edition (graphics driver + control panel in one package, same version).
+        # The downloaded exe is run directly with "-install" (AMD RS-INSTALL / Chocolatey package).
+        # Other AMD installers (e.g. chipset software) use different switches, so they are matched narrowly.
+        $amdLabel = "$($fvi.ProductName) $($fvi.FileDescription) $([System.IO.Path]::GetFileName($FilePath))"
+        if ($fvi.CompanyName -like "*Advanced Micro Devices*" -and $amdLabel -match 'Adrenalin|Radeon|AMD Software|amd-software') {
+            return @{
+                Type        = "AMD Software (Adrenalin)"
+                Installer   = $FilePath
+                SilentArgs  = "-install"
+                Command     = "`"$FilePath`" -install"
+                Description = "AMD Grafik Sürücüsü ve Adrenalin Paketi"
+            }
+        }
+
         # Inno Setup Detection
         if ($desc -like "*Inno Setup*" -or $asciiString -like "*Inno Setup*" -or $asciiString -like "*jr.InnoSetup*") {
             return @{

@@ -12,7 +12,7 @@ Tek bir WinForms arayüzünden:
 - **Canlı İzleme:** CPU/GPU/RAM/disk/pil telemetrisi (2 sn'de bir)
 - **Sistem Bakımı:** temp temizliği, Windows Update önbelleği, DISM, ağ sıfırlama, TRIM, pil raporu; haftalık **zamanlanmış bakım** (Görev Zamanlayıcı)
 - **Kurulum Sihirbazı:** `steps.json`'daki 13 modülü sırayla çalıştırır; yeniden başlatmaya dayanıklıdır
-- **GPU & Sürücüler:** GPU'ya göre üretici yardımcı yazılımı önerir/kurar, sürücü yedekler
+- **GPU & Sürücüler:** GPU'ya göre üretici yardımcı yazılımını önerir/kurar (sürücü yedekleme yok; sürücü güncellemeleri `Installers\` ile yapılır)
 - **Güncellemeler:** `winget upgrade` ile güncellemesi olan uygulamaları listeler, seçilenleri sırayla günceller
 - **Konsol & Loglar:** tüm olayların birleşik günlüğü
 
@@ -56,11 +56,11 @@ PostInstall.exe (Program.cs)        UAC ile yükseltir, konsolsuz powershell.exe
 | `Tools\Invoke-ScheduledMaintenance.ps1` | Görevin çalıştırdığı betik; `-DryRun` yalnızca planı yazar. Log: `Logs\ScheduledMaintenance.log`, özet: `Reports\LastScheduledMaintenance.json` |
 | `Tools\HardwareMonitorEngine.ps1` | Telemetri örneği (`Get-LiveTelemetrySample`) |
 | `Tools\SilentDetector.ps1` | Yükleyici türü + sessiz parametre tespiti, "zaten kurulu mu" kontrolü |
-| `Tools\SnapshotEngine.ps1`, `DriverEngine.ps1`, `ReportingEngine.ps1`, `SystemSpecsCollector.ps1` | Geri yükleme noktası, sürücü yedek/enjeksiyon, HTML rapor, donanım profili |
+| `Tools\SnapshotEngine.ps1`, `DriverEngine.ps1`, `ReportingEngine.ps1`, `SystemSpecsCollector.ps1` | Geri yükleme noktası, `Drivers\` klasöründen çevrimdışı INF enjeksiyonu (modül 05), HTML rapor, donanım profili |
 | `Tools\Build-Launcher.ps1` | `Program.cs` → `PostInstall.exe` (Windows'taki `csc.exe` ile) |
 | `Tools\Enforce-Encoding.ps1` | Tüm `.ps1/.json` dosyalarını UTF-8 **BOM'lu** yapar |
 | `Test-PostInstallSuite.ps1` | Test bataryası (aşağıya bakın) |
-| `Installers\` | Kullanıcının çevrimdışı kurulum dosyaları (git'e girmez) |
+| `Installers\` | Çevrimdışı kurulum dosyaları (git'e girmez). Modül 10 hepsini sessiz kurar; aynı/yeni sürüm kuruluysa atlar, **eski kuruluysa günceller**. GPU sürücü güncellemeleri de buradan yapılır (NVIDIA: `-s -noreboot`, AMD Adrenalin: `-install`) |
 
 ## 4. Çalışma zamanı dosyaları
 

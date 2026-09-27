@@ -392,10 +392,10 @@ Invoke-SuiteTest -Category "Tools Sandbox" -Name "DriverEngine.ps1 (INF discover
     try {
         # Discovery only: an empty sub-folder filter means pnputil receives no valid package
         [System.IO.File]::WriteAllText((Join-Path $sb "test_device.inf"), "; Test INF`n[Version]`nSignature=`"`$Windows NT$`"`nClass=System`n")
-        Assert-True ((Get-Command Export-SystemDrivers -ErrorAction SilentlyContinue) -ne $null) "Export-SystemDrivers exported"
+        Assert-True ((Get-Command Install-SystemDrivers -ErrorAction SilentlyContinue) -ne $null) "Install-SystemDrivers exported"
         $infs = @(Get-ChildItem -Path $sb -Filter "*.inf" -Recurse)
         Assert-True ($infs.Count -eq 1) "INF discovery"
-        "Export/Install functions exported, INF discovery OK"
+        "Install-SystemDrivers exported, INF discovery OK"
     } finally {
         Remove-Item $sb -Recurse -Force -ErrorAction SilentlyContinue
     }
