@@ -22,8 +22,10 @@ $root = Split-Path -Parent $PSScriptRoot
 
 $vm = Get-VM -Name $VmName -ErrorAction Stop
 if ($vm.State -ne "Running") { throw "'$VmName' calismiyor. Once VM'i baslatip Windows'a giris yapin." }
-$gs = Get-VMIntegrationService -VMName $VmName -Name "Guest Service Interface"
-if (-not $gs.Enabled) { Enable-VMIntegrationService -VMName $VmName -Name "Guest Service Interface" }
+# Service names are localized ("Konuk Hizmeti Arabirimi" on Turkish Windows): match by the fixed component id
+$gs = Get-VMIntegrationService -VMName $VmName | Where-Object { $_.Id -like "*6C09BB55-D683-4DA0-8931-C9BF705F6480" }
+if (-not $gs) { throw "Konuk Hizmeti Arabirimi (Guest Services) bulunamadi." }
+if (-not $gs.Enabled) { $gs | Enable-VMIntegrationService; Start-Sleep -Seconds 5 }
 
 $files = Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
     $rel = $_.FullName.Substring($root.Length).TrimStart('\')
